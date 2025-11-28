@@ -1,4 +1,4 @@
-function React_Passive_fUS_preprocessing(sessions)
+function Master_fUS_preproc(sessions)
 %{
 This is a master script for fUS preprocessing in React Passive project
 %}

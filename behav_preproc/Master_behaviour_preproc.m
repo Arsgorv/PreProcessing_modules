@@ -1,4 +1,4 @@
-function React_Passive_Behaviour_preprocessing()
+function Master_behaviour_preproc(sessions)
 
 % This is a master script to process the DLC behavioural ferret data for
 % ReactActive project
