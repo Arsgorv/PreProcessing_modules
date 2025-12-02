@@ -198,6 +198,11 @@ for idx = 1:2
         savedIndices = (1:nCSV)';
     end
     
+%     % after detecting raw video TTL peaks (in samples)
+% t_video_s_raw = video_peak_idx / Fs;          % Fs = OE downsampled fs (e.g. 1250)
+% Nframes_video = expected_video_frames;        % from DLC or video metadata
+% [t_video_s, info_video] = RP_regularize_ttl(t_video_s_raw, Nframes_video, 'video', 1);
+%     
     %% ----------- Part 4: Synchronize DLC Data with OpenEphys Time -----------
     % Since openEphys (LFP) recording starts before video, we can compute a delay.
     % Use the first video timestamp (data_csv(1)) and the first LFP trigger (time_1st_trig).

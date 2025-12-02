@@ -22,6 +22,9 @@ for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}]) 
     draw_masks(sessions{sess});
 end
+%% NOT USED YET: Scratching_denoise
+Scratching_denoise
+
 
 %% %%%%%%%%%%%%%%%%%%%%%%%% NOT USED %%%%%%%%%%%%%%%%%%%%%%%%
     
@@ -63,9 +66,6 @@ for i = 1:length(slots)
     close
 
 end
-
-%% NOT USED: Scratching_denoise
-Scratching_denoise
 
 %% NOT USED: Reposition_block_images
 %{     
