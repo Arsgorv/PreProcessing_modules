@@ -51,11 +51,20 @@ switch animal_name
         cfg.eye_ch   = [];
         cfg.respi    = [];
         cfg.heart    = [];
+        cfg.OneBox   = [];
+    case {'Chabichou'}
+        cfg.fus_ch   = [];
+        cfg.baphy_ch = [];
+        cfg.face_ch  = [];
+        cfg.eye_ch   = [];
+        cfg.respi    = [];
+        cfg.heart    = [];  
+        cfg.OneBox   = [];
     case {'Tvorozhok'} % training
         cfg.fus_ch   = [];
         cfg.respi    = 19;
         cfg.heart    = 20;
-        cfg.OneBox   = NaN;
+        cfg.OneBox   = [];
         cfg.baphy_ch = 22;
         cfg.face_ch  = 23;
         cfg.eye_ch   = 24;
@@ -73,12 +82,13 @@ switch animal_name
         cfg.face_ch  = 22;
         cfg.eye_ch   = [];
         cfg.respi    = [];
-        cfg.heart    = 26;        
+        cfg.heart    = 26;   
+        cfg.OneBox   = [];        
     case {'Mochi'} % training
         cfg.fus_ch   = [];
         cfg.respi    = 19;
         cfg.heart    = 20;
-        cfg.OneBox   = NaN;
+        cfg.OneBox   = [];
         cfg.baphy_ch = 22;
         cfg.face_ch  = 23;
         cfg.eye_ch   = 24;
@@ -94,7 +104,7 @@ switch animal_name
         cfg.fus_ch   = [];
         cfg.respi    = 19;
         cfg.heart    = 20;
-        cfg.OneBox   = NaN;
+        cfg.OneBox   = [];
         cfg.baphy_ch = 22;
         cfg.face_ch  = 23;
         cfg.eye_ch   = 24;

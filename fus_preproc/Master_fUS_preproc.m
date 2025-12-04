@@ -23,7 +23,7 @@ for sess = 1:numel(sessions)
     draw_masks(sessions{sess});
 end
 %% NOT USED YET: Scratching_denoise
-Scratching_denoise
+% Scratching_denoise
 
 
 %% %%%%%%%%%%%%%%%%%%%%%%%% NOT USED %%%%%%%%%%%%%%%%%%%%%%%%
@@ -31,42 +31,42 @@ Scratching_denoise
 %% NOT USED: FIGURE: Overview of the dataset
 
 % slots = {['C'],['D','E','F','G','H','I'], ['J','K','L','M','N','O'],['P','Q','R','S','T','U']}; %Chabichou
-slots = {['F','P','G','W','D','Q'],['H','S','L','U','E','R'],['I','T','C','N','J','V'],['M', 'O', 'K']}; % full ds
-
-figpath = '/Figs/2024/Dataset_overview/';
-
-for i = 1:length(slots)
-    f1 = figure('Visible', 'off');
-    sgtitle(['Overview of slices ' slots{i} ' for Edel (log10)'], 'FontWeight', 'bold', 'FontSize', 23)
-    set(f1, 'Units', 'Normalized', 'Position', [0.0146 0 0.5000 0.9124]);
-
-    count = 1;
-    
-    for j = 1:length(slots{i})
-        
-        slot_code = slots{i}(j);
-        disp(['working on ' slot_code])
-        addpath(genpath([datapath '/' slot_code]))
-        cd([datapath '/' slot_code]);
-        load('data_cat.mat')
-        
-        for sess = 1:2
-            subplot(3,4,count)
-%             subplot(1,2,count)
-            imagesc(log10(squeeze(mean(data_cat(:, :, :, sess), 3))))
-            count = count + 1;
-            axis equal tight
-            xticks('')
-            yticks('')
-            title(['Slice ' slot_code ', Sess #' num2str(sess)])
-        end
-    end
-    saveas(gcf, [datapath figpath 'svg/' 'Overview_log10_' slots{i}], 'svg')
-    saveas(gcf, [datapath figpath 'Overview_log10_' slots{i}], 'png')
-    close
-
-end
-
+% slots = {['F','P','G','W','D','Q'],['H','S','L','U','E','R'],['I','T','C','N','J','V'],['M', 'O', 'K']}; % full ds
+% 
+% figpath = '/Figs/2024/Dataset_overview/';
+% 
+% for i = 1:length(slots)
+%     f1 = figure('Visible', 'off');
+%     sgtitle(['Overview of slices ' slots{i} ' for Edel (log10)'], 'FontWeight', 'bold', 'FontSize', 23)
+%     set(f1, 'Units', 'Normalized', 'Position', [0.0146 0 0.5000 0.9124]);
+% 
+%     count = 1;
+%     
+%     for j = 1:length(slots{i})
+%         
+%         slot_code = slots{i}(j);
+%         disp(['working on ' slot_code])
+%         addpath(genpath([datapath '/' slot_code]))
+%         cd([datapath '/' slot_code]);
+%         load('data_cat.mat')
+%         
+%         for sess = 1:2
+%             subplot(3,4,count)
+% %             subplot(1,2,count)
+%             imagesc(log10(squeeze(mean(data_cat(:, :, :, sess), 3))))
+%             count = count + 1;
+%             axis equal tight
+%             xticks('')
+%             yticks('')
+%             title(['Slice ' slot_code ', Sess #' num2str(sess)])
+%         end
+%     end
+%     saveas(gcf, [datapath figpath 'svg/' 'Overview_log10_' slots{i}], 'svg')
+%     saveas(gcf, [datapath figpath 'Overview_log10_' slots{i}], 'png')
+%     close
+% 
+% end
+% 
 %% NOT USED: Reposition_block_images
 %{     
     % 20230802 AG: I'm not happy with RepositionBlockImages approach and will try to use Jeffrey's run_normcorre_batch.m

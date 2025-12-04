@@ -28,8 +28,6 @@ epochDuration = nan(3,1);
 exp_info.size = cell(3,1);
 exp_info.phasename = cell(3,1);
 
-save([datapath filesep 'fUS' filesep 'exp_info.mat'], ...
-    'exp_info', '-v7.3');
 
 for count = 1:3
     file_idx = file_order(count);
@@ -58,6 +56,10 @@ for count = 1:3
     exp_info.size{count} = size(tmp);
     exp_info.phasename{count} = file_n;
 end
+
+save([datapath filesep 'fUS' filesep 'exp_info.mat'], ...
+    'exp_info', '-v7.3');
+
 
 %% Build raw_data 
 % Build raw_data and tsd per slice for Edel / Chabichou (3D: x,y,time)
