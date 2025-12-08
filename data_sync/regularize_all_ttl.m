@@ -9,7 +9,7 @@ if nargin < 3
     datapath = '';
 end
 
-channel_list = {'fus','baphy','video','cam','face','eye'};
+channel_list = {'fus','baphy','face_cam','eye_cam'};
 
 for c = 1:numel(channel_list)
     fname = channel_list{c};

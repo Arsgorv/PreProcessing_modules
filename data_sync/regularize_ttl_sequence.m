@@ -55,7 +55,7 @@ if contains(lbl,'fus')
         t_seg = t(idx_range);
 
         if numel(t_seg) < 2
-            t_all = [t_all; t_seg]; %#ok<AGROW>
+            t_all = [t_all; t_seg]; 
             continue
         end
 
@@ -63,7 +63,7 @@ if contains(lbl,'fus')
         medITI_seg = median(iti_seg);
 
         if medITI_seg <= 0
-            t_all = [t_all; t_seg]; %#ok<AGROW>
+            t_all = [t_all; t_seg]; 
             continue
         end
 
@@ -102,7 +102,7 @@ if contains(lbl,'fus')
                         continue
                     end
                     new_times = t_seg(i) + (1:n_missing) * (dt_gap / (n_missing + 1));
-                    new_all = [new_all; new_times(:)]; %#ok<AGROW>
+                    new_all = [new_all; new_times(:)]; 
                     n_inserted_seg = n_inserted_seg + n_missing;
                     changed = true;
                 end
@@ -190,7 +190,7 @@ for k = 1:numel(big_idx)
         continue
     end
     new_times = t(i) + (1:n_missing) * (dt_gap / (n_missing + 1));
-    to_add = [to_add; new_times(:)]; %#ok<AGROW>
+    to_add = [to_add; new_times(:)]; 
 end
 
 if ~isempty(to_add)
