@@ -55,9 +55,9 @@ if isfield(trig_csv,'baphy_time_s') && ~isempty(trig_csv.baphy_time_s)
 
     t_baphy = trig_csv.baphy_time_s(:);
     try
-        [~, ~, first_idx, last_idx] = RP_detect_trial_onsets_from_baphy_ttl(t_baphy, B.n_trials);
+        [~, ~, first_idx, last_idx] = detect_trial_onsets_from_baphy_ttl(datapath, t_baphy, B.n_trials);
     catch
-        [~, ~, first_idx, last_idx] = RP_detect_trial_onsets_from_baphy_ttl(t_baphy, []);
+        [~, ~, first_idx, last_idx] = detect_trial_onsets_from_baphy_ttl(datapath, t_baphy, []);
     end
 
     if ~isempty(first_idx)

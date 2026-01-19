@@ -6,14 +6,15 @@ function openEphys2wave_clus(root,chLst,numChannels,CommonRefChannels)
 % chLst = 1:32; numChannels = 113;
 % openEphys2wave_clus(root,chLst,numChannels,CommonRefChannels);
 % Diplays session name
-strLocus2 = strfind(root,'Record Node');
-strLocus1 = find(root(1:(strLocus2-2))=='/',1,'last');
-folderaddress = ['~/' root(strLocus1+1:strLocus2-2) '_ComRef' num2str(CommonRefChannels(1)) '-' num2str(CommonRefChannels(end)) ];
+% strLocus2 = strfind(root,'Record Node');
+% strLocus1 = find(root(1:(strLocus2-2))=='/',1,'last');
+% folderaddress = ['~/' root(strLocus1+1:strLocus2-2) '_ComRef' num2str(CommonRefChannels(1)) '-' num2str(CommonRefChannels(end)) ];
+folderaddress ='Z:\Arsenii\React_Passive_ephys\Raw_data\Kiri\Kiri_2026-01-08_17-20-02_test\Kiri_2026-01-08_17-20-02_test_ComRef1-32';
 disp(folderaddress);
 mkdir(folderaddress);
 cd(folderaddress);
 
-datFile = [root 'continuous.dat'];
+datFile = [root '\continuous.dat'];
 % numChannels = 43; % Nombre total de canaux
 samplingRate = 30000; % Exemple de fréquence d'échantillonnage, adapte selon ton setup
 bytesPerSample = 2; % int16 -> 2 octets

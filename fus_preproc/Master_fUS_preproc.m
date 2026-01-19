@@ -87,7 +87,7 @@ end
     end
     data_cat(:,:,:,sess) = squeeze(data_repo);
 %}
-    
+  
 %% NOT USED: Align two sessions of the same slice (letter)
 %{
 %Draw the mask for the realignment

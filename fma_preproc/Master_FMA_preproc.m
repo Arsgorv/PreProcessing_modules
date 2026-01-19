@@ -1,6 +1,6 @@
-function run_wave_clus(session)
-% cd('~/data5/Arsenii/OBG_AG/Shropshire/wave_clus_codes')
-% %% Done
+function Master_FMA_preproc(session)
+%{
+ %% Done
 % if session == 'F04'
 %     root = '~/data5/Arsenii/OBG_AG/Shropshire/freely-moving/Shropshire_20241204/shropshire_2024-12-04_12-56-50_fm_torcs/Record Node 101/experiment1/recording1/continuous/Rhythm_FPGA-100.0/';
 %     numChannels = 113;
@@ -203,7 +203,6 @@ function run_wave_clus(session)
 %     root = '~/data5/Arsenii/OBG_AG/Shropshire/freely-moving/Shropshire_20250107/shropshire_2025-01-07_12-06-49_fm_LSP_saline/Record Node 101/experiment1/recording1/continuous/Rhythm_FPGA-100.0/';
 %     disp('running Shropshire_20250107')
 
-%% Running
 
 % Error in openEphys2wave_lus (line 23) - numSamples
 if session == 'L28'
@@ -213,9 +212,6 @@ if session == 'L28'
     root = '~/data5/Arsenii/OBG_AG/Shropshire/head-fixed/Shropshire_20241206/shropshire_2024-12-06_09-40-33_hf_TORCs/Record Node 101/experiment1/recording1/continuous/Rhythm_FPGA-100.0/';
     disp('running Shropshire_20241206')
 end
-
-%
-
 elseif session == 'L30'
     root = '~/data5/Arsenii/OBG_AG/Shropshire/freely-moving/Shropshire_20250103/shropshire_2025-01-03_13-43-16_fm_LSP_saline/Record Node 101/experiment1/recording1/continuous/Rhythm_FPGA-100.0/';
     disp('running Shropshire_20250103')
@@ -242,6 +238,16 @@ disp('running the 2nd array')
 tic
 openEphys2wave_clus(root,chLst_2,numChannels,CommonRefChannels_2);
 disp(['it took me ' num2str(round(toc/60)) 'm'])
+
+%}
+
+tic/60;
+root = 'Z:\Arsenii\React_Passive_ephys\Raw_data\Kiri\Kiri_2026-01-08_17-20-02_test\recording1\continuous\Rhythm_FPGA-100.0';
+numChannels = 62;
+chLst_1 = [1:32]; CommonRefChannels_1 = [1:32];
+openEphys2wave_clus(root,chLst_1,numChannels,CommonRefChannels_1);
+disp(toc/60)
+
 
 
 end
