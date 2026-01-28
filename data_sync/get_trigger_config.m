@@ -115,12 +115,12 @@ switch animal_name
         cfg.eye_ch   = 24;
         cfg.baphy_train_gap_s = 0.10;
     case {'Ficello'}
-        cfg.fus_ch   = NaN;
-        cfg.baphy_ch = NaN;
-        cfg.face_ch  = NaN;
-        cfg.eye_ch   = NaN;
-        cfg.respi    = NaN;
-        cfg.heart    = NaN;        
+        cfg.fus_ch   = 56;
+        cfg.baphy_ch = 55;
+        cfg.face_ch  = 57;
+        cfg.eye_ch   = [];
+        cfg.respi    = [];
+        cfg.heart    = 61;        
         cfg.baphy_train_gap_s = 0.10;
     case {'Kiri'}
         cfg.fus_ch   = NaN;

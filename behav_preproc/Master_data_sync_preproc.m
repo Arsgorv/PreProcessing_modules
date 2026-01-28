@@ -53,7 +53,7 @@ for sess = 1:numel(sessions)
         trig_csv = [];
         if strcmp(project,'RP')
             if contains(datapath,'Edel') || contains(datapath,'Chabichou')
-                disp('  [3] Syncing Baphy–fUS from csv (RP_sync_triggers_passive)...')
+                disp('  [3] Syncing Baphyï¿½fUS from csv (RP_sync_triggers_passive)...')
                 trig_csv = RP_sync_triggers_passive(datapath);
             else
                 disp('  [3] No csv sync step for this animal (skip RP_sync_triggers_passive).')
@@ -122,6 +122,14 @@ for sess = 1:numel(sessions)
                 end
                 Epochs = RP_build_epochs_passive_csv_only(datapath, trig_csv, Baphy);
             end
+        elseif srcmp(project, 'Tonotopy')
+            if has_OE && ~isempty(trigOE)
+                disp('  [7] Building epochs (RP_build_epochs_tonotopy)...')
+                Epochs = RP_build_epochs_tonotopy(datapath, trigOE, Baphy);
+            else
+                disp(' No tonotopy yet for .csv triggers')
+            end
+            
         else
             if ~has_OE || isempty(trigOE)
                 error('RA requires OE triggers. No OE LFPData detected.');

@@ -7,7 +7,11 @@ This is a master script for fUS preprocessing in React Passive project
 plt = 0;
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
-    make_tsd_raw(sessions{sess});
+    if contains(sessions{sess}, 'Tonotopy')
+        make_tsd_raw_tonotopy(sessions{sess});
+    else
+        make_tsd_raw(sessions{sess});
+    end
 end
 
 %% Align frames within one session. Save data_cat
