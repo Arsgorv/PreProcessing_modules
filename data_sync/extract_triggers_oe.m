@@ -116,19 +116,35 @@ for k = 1:numel(ttl_names)
     % TTL detection: use detect_ttl_from_lfp_channel
     [peak_time_ts, info_det] = detect_ttl_from_lfp_channel(v, t_ts, ch, Inf);
 
-    if contains(ttl_name,'baphy') && (contains(datapath, 'Kosichka') || contains(datapath, 'Ficello'))
+    if contains(ttl_name,'baphy')
         disp('Grouping TTL trains')
         gap_sec = 0.1; 
+       
+        if exist('cfg','var') && isfield(cfg,'baphy_train_gap_s') && ~isempty(cfg.baphy_train_gap_s)
+            gap_s = cfg.baphy_train_gap_s;
+        end
         % compress trains ? one start and one stop per trial
-        [trial_start_ts,trial_stop_ts,info_group] = group_ttl_trains(peak_time_ts);
-        
+        if contains(cfg.project_hint, 'RP')
+            gap_sec = 0.2;
+            [trial_start_ts,trial_stop_ts,info_group] = group_ttl_trains(peak_time_ts, gap_sec);
+        elseif contains(cfg.project_hint, 'RA')
+            % notion of trial_stop_ts is useless here, because one trial
+            % contains one pulse contraty to RP. Trial end will be defined
+            % later using baphy information
+            trial_start_ts = peak_time_ts;
+            info_group.n_pulses  = numel(peak_time_ts);
+            info_group.n_trials  =  numel(peak_time_ts);
+            info_group.gap_ts = [];
+        end
         % for Baphy alignment, use only trial starts
         peak_time_ts = trial_start_ts;
         
         trigOE.(ttl_name).n_raw_pulses   = info_group.n_pulses;
         trigOE.(ttl_name).n_trials       = info_group.n_trials;
         trigOE.(ttl_name).trial_start_ts = trial_start_ts;
-        trigOE.(ttl_name).trial_stop_ts  = trial_stop_ts;
+        if contains(cfg.project_hint, 'RP')
+            trigOE.(ttl_name).trial_stop_ts  = trial_stop_ts;
+        end
         trigOE.(ttl_name).gap_ts         = info_group.gap_ts;
     end
     peak_idx = info_det.peak_indices(:);

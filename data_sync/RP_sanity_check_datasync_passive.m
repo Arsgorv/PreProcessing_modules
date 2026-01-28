@@ -1,4 +1,4 @@
-function check_datasync(datapath)
+function RP_sanity_check_datasync_passive(datapath)
 
 load(fullfile(datapath, 'Master_sync.mat'))
 if contains(datapath, 'Edel')

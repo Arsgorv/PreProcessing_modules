@@ -6,9 +6,13 @@ function behaviour_preprocessing(datapath)
 %% Initialization
 [~, Session_params.session_selection, ~] = fileparts(datapath);
 
+Session_params.do_plots = 0;          % set 0 to skip QC plots
+Session_params.save_plots = 0;        % save pngs in video/
+Session_params.qc_subsample = 20;     % for scatter decimation
 Session_params.fig_visibility = 'on';
 
-animals = {'Shropshire','Brynza','Labneh','Tvorozhok','Kosichka'};
+Session_params.animal_name = 'Unknown';
+animals = {'Shropshire','Brynza','Labneh','Tvorozhok','Kosichka','Mochi','Edel','Chabichou','Ficello','Kiri','Brayon'};
 for i=1:numel(animals)
     if contains(datapath, animals{i})
         Session_params.animal_name = animals{i};
@@ -255,6 +259,176 @@ else
         'spout_likelihood', '-append');
 end
 
+%% QC / Sanity check plots (time series + scatter) -------------------------
+if isfield(Session_params,'do_plots') && Session_params.do_plots == 1
+    
+    % ---- time axis: auto-detect units (ts=1e-4s vs seconds)
+    dt_face = nanmedian(diff(time_face));
+    dt_eye  = nanmedian(diff(time_eye));
+    
+    if dt_face > 1
+        t_face = time_face(:) / 1e4;   % seconds
+    else
+        t_face = time_face(:);         % already seconds
+    end
+    if dt_eye > 1
+        t_eye = time_eye(:) / 1e4;
+    else
+        t_eye = time_eye(:);
+    end
+    
+    qc_dir = fullfile(datapath, 'video');
+    if ~exist(qc_dir, 'dir'), mkdir(qc_dir); end
+    
+    % helper indices for scatter
+    ss_face = max(1, Session_params.qc_subsample);
+    ss_eye  = max(1, Session_params.qc_subsample);
+    idx_face = 1:ss_face:numel(t_face);
+    idx_eye  = 1:ss_eye:numel(t_eye);
+    
+    %% Figure 1: Main dynamics (areas + movements + likelihood)
+    f1 = figure('Visible', Session_params.fig_visibility);
+    set(f1, 'Units', 'Normalized', 'Position', [0.05 0.05 0.9 0.85]);
+    
+    try
+        sgtitle([Session_params.animal_name '. Session: ' Session_params.session_selection], 'FontWeight', 'bold');
+    catch
+        suptitle([Session_params.animal_name '. Session: ' Session_params.session_selection]);
+    end
+    
+    subplot(4,1,1);
+    plot(t_face, pupil_area_004_norm); hold on;
+    plot(t_face, eye_area_004_norm);
+    plot(t_face, nostril_area_norm);
+    plot(t_face, nose_area_norm);
+    xlabel('Time (s)'); ylabel('Norm area');
+    legend({'pupil004','eye004','nostril','nose'}, 'Location','best');
+    title('Face cam: normalized areas'); grid on;
+    
+    subplot(4,1,2);
+    plot(t_eye, pupil_area_007_norm); hold on;
+    plot(t_eye, eye_area_007_norm);
+    xlabel('Time (s)'); ylabel('Norm area');
+    legend({'pupil007','eye007'}, 'Location','best');
+    title('Eye cam: normalized areas'); grid on;
+    
+    subplot(4,1,3);
+    plot(t_face, pupil_center_004_mvt_norm); hold on;
+    plot(t_face, nostril_center_mvt_norm);
+    plot(t_face, nose_center_mvt_norm);
+    plot(t_face, jaw_center_mvt_norm);
+    plot(t_face, tongue_center_mvt_norm);
+    plot(t_face, spout_center_mvt_norm);
+    xlabel('Time (s)'); ylabel('Norm movement');
+    legend({'pupil','nostril','nose','jaw','tongue','spout'}, 'Location','best');
+    title('Face cam: center movement (normalized)'); grid on;
+    
+    subplot(4,1,4);
+    if exist('spout_likelihood','var') && ~isempty(spout_likelihood)
+        sp = spout_likelihood;
+        
+        % ensure numeric vector
+        if iscell(sp)
+            try
+                sp = cell2mat(sp);
+            catch
+                sp = [];
+            end
+        end
+        if isstruct(sp) || isa(sp,'tsd')
+            try
+                sp = Data(sp);
+            catch
+                sp = [];
+            end
+        end
+        sp = double(sp(:));
+        
+        % length match to face time
+        n = min(numel(t_face), numel(sp));
+        if n > 1
+            plot(t_face(1:n), sp(1:n), 'k');
+        end
+    end
+    xlabel('Time (s)'); ylabel('Likelihood');
+    title('Spout likelihood (face cam)'); grid on;
+    
+    if Session_params.save_plots == 1
+        print(f1, fullfile(qc_dir, 'QC_behaviour_timeseries.png'), '-dpng', '-r150');
+    end
+    
+    
+    %% Figure 3: Eye cam pupil center scatter + drift
+    f3 = figure('Visible', Session_params.fig_visibility);
+    set(f3, 'Units', 'Normalized', 'Position', [0.1 0.1 0.8 0.75]);
+    
+    subplot(2,1,1);
+    scatter(pupil_center_007_norm(idx_eye,1), pupil_center_007_norm(idx_eye,2), 5, 'filled');
+    axis equal; grid on;
+    xlabel('x'); ylabel('y'); title('pupil center (eye cam)');
+    
+    subplot(2,1,2);
+    plot(t_eye, pupil_center_007_norm(:,1)); hold on;
+    plot(t_eye, pupil_center_007_norm(:,2));
+    xlabel('Time (s)'); ylabel('Norm position');
+    legend({'x','y'}, 'Location','best');
+    title('pupil center drift (eye cam)'); grid on;
+    
+    if Session_params.save_plots == 1
+        print(f3, fullfile(qc_dir, 'QC_behaviour_eye_pupil.png'), '-dpng', '-r150');
+    end
+    
+    
+    %% Figure 5: Mean bodypart coordinates (one plot)
+    f5 = figure('Visible', Session_params.fig_visibility);
+    set(f5, 'Units', 'Normalized', 'Position', [0.2 0.2 0.6 0.6]);
+    hold on; grid on; axis equal;
+    xlabel('x (norm)'); ylabel('y (norm)');
+    title('Mean bodypart coordinates (centers)');
+    
+    % Face cam centers
+    pts = {};
+    if exist('pupil_center_004_norm','var') && ~isempty(pupil_center_004_norm)
+        pts(end+1,:) = {'pupil_face', nanmean(pupil_center_004_norm(:,1)), nanmean(pupil_center_004_norm(:,2))};
+    end
+    if exist('nostril_center_norm','var') && ~isempty(nostril_center_norm)
+        pts(end+1,:) = {'nostril', nanmean(nostril_center_norm(:,1)), nanmean(nostril_center_norm(:,2))};
+    end
+    if exist('nose_center_norm','var') && ~isempty(nose_center_norm)
+        pts(end+1,:) = {'nose', nanmean(nose_center_norm(:,1)), nanmean(nose_center_norm(:,2))};
+    end
+    if exist('jaw_center_norm','var') && ~isempty(jaw_center_norm)
+        pts(end+1,:) = {'jaw', nanmean(jaw_center_norm(:,1)), nanmean(jaw_center_norm(:,2))};
+    end
+    if exist('tongue_center_norm','var') && ~isempty(tongue_center_norm)
+        pts(end+1,:) = {'tongue', nanmean(tongue_center_norm(:,1)), nanmean(tongue_center_norm(:,2))};
+    end
+    if exist('spout_center_norm','var') && ~isempty(spout_center_norm)
+        pts(end+1,:) = {'spout', nanmean(spout_center_norm(:,1)), nanmean(spout_center_norm(:,2))};
+    end
+    
+    % Eye cam pupil center
+    if exist('pupil_center_007_norm','var') && ~isempty(pupil_center_007_norm)
+        pts(end+1,:) = {'pupil_eye', nanmean(pupil_center_007_norm(:,1)), nanmean(pupil_center_007_norm(:,2))};
+    end
+    
+    % Plot
+    for i = 1:size(pts,1)
+        name = pts{i,1};
+        x = pts{i,2};
+        y = pts{i,3};
+        
+        h = plot(x, y, 'o', 'MarkerSize', 8, 'LineWidth', 1.5);
+        text(x, y, ['  ' name], 'FontSize', 10, 'Color', get(h,'Color'));
+    end
+    
+    legend({pts{:,1}}, 'Location','bestoutside');
+    
+    if Session_params.save_plots == 1
+        print(f5, fullfile(qc_dir, 'QC_behaviour_mean_bodypart_coords.png'), '-dpng', '-r150');
+    end
+    
+end
 
 
 
@@ -265,22 +439,22 @@ end
 % %% Plot figures
 % f1 = figure('Visible', Session_params.fig_visibility);
 % set(f1, 'Units', 'Normalized', 'Position', [0 0 1 1]);
-% 
+%
 % f2 = figure('Visible', Session_params.fig_visibility);
 % set(f2, 'Units', 'Normalized', 'Position', [0 0 1 1]);
-% 
+%
 % f3 = figure('Visible', Session_params.fig_visibility);
 % set(f3, 'Units', 'Normalized', 'Position', [0 0 1 1]);
-% 
+%
 % f4 = figure('Visible', Session_params.fig_visibility);
 % set(f4, 'Units', 'Normalized', 'Position', [0 0 1 1]);
-% 
+%
 % f5 = figure('Visible', Session_params.fig_visibility);
 % set(f5, 'Units', 'Normalized', 'Position', [0 0 1 1]);
-% 
+%
 % %% f1: Dynamics plots
 % set(0, 'CurrentFigure', f1)
-% 
+%
 % try
 %     sgtitle([Session_params.animal_name '. Session: '  Session_params.session_selection], 'FontWeight', 'bold')
 % catch
@@ -290,37 +464,37 @@ end
 % plot(data(:, 1), Data(pupil_004_x));
 % title('pupil_x')
 % xlabel('Time (s)')
-% 
+%
 % subplot(3,3,2)
 % plot(data(:, 1), Data(pupil_004_y));
 % title('pupil_y')
 % xlabel('Time (s)')
-% 
+%
 % subplot(3,3,3)
 % sparse_pupil_x = Data(pupil_004_x);
 % sparse_pupil_y = Data(pupil_004_y);
 % scatter(sparse_pupil_x(1:1000:end), sparse_pupil_y(1:1000:end));
 % title('pupil')
 % xlabel('Time (s)')
-% 
+%
 % % eye
 % subplot(3,3,4)
 % plot(data(:, 1), Data(eye_004_x))
 % title('eye_x')
 % xlabel('Time (s)')
-% 
+%
 % subplot(3,3,5)
 % plot(data(:, 1), Data(eye_y))
 % title('eye_y')
 % xlabel('Time (s)')
-% 
+%
 % subplot(3,3,6)
 % sparse_eye_x = Data(eye_004_x);
 % sparse_eye_y = Data(eye_y);
 % scatter(sparse_eye_x(1:1000:end), sparse_eye_y(1:1000:end))
 % title('eye')
 % xlabel('Time (s)')
-% 
+%
 % % another version of scatter that works in mobs
 % % col_map=magma;
 % %
@@ -333,25 +507,25 @@ end
 % %     plot(pupil_x(1:10:end,i), pupil_y(1:10:end,i),'.','Color',col_map(32*i,:))
 % %     hold on
 % % end
-% 
+%
 % % nostril
 % subplot(3,3,7)
 % plot(data(:, 1), Data(nostril_x))
 % title('nostril_x')
 % xlabel('Time (s)')
-% 
+%
 % subplot(3,3,8)
 % plot(data(:, 1), Data(nostril_y))
 % title('nostril_y')
 % xlabel('Time (s)')
-% 
+%
 % subplot(3,3,9)
 % sparse_nostril_x = Data(nostril_x);
 % sparse_nostril_y = Data(nostril_y);
 % scatter(sparse_nostril_x(1:1000:end), sparse_nostril_y(1:1000:end))
 % title('nostril')
 % xlabel('Time (s)')
-% 
+%
 % % another version of scatter that works in mobs
 % % figure
 % % for i=1:4
@@ -362,14 +536,14 @@ end
 % %% f2: Areas plots
 % set(0, 'CurrentFigure', f2)
 % sgtitle([Session_params.animal_name '. Session: ' Session_params.session_selection], 'FontWeight', 'bold')
-% 
+%
 % subplot(311)
 % plot(data(:, 1), Data(areas_pupil))
 % hold on
 % plot(data(:, 1), Data(areas_eye))
 % title('pupil and eye areas evolution')
 % xlabel('Time (s)')
-% 
+%
 % subplot(312)
 % plot(data(:, 1), zscore(Data(areas_pupil)))
 % hold on
@@ -380,25 +554,25 @@ end
 % %% f3: Velocity/Acceleration plots
 % set(0, 'CurrentFigure', f3)
 % sgtitle([Session_params.animal_name '. Session: ' Session_params.session_selection], 'FontWeight', 'bold')
-% 
+%
 % subplot(411)
 % plot(data(:, 1), Data(velocity_pupil_center));
 % title('velocity of the pupil')
 % legend({'velocity x', 'velocity y'})
 % xlabel('Time (s)')
-% 
+%
 % subplot(412)
 % plot(data(:, 1), Data(acceleration_pupil_center))
 % title('Acceleration of the pupil')
 % legend({'Acceleration x', 'Acceleration y'})
 % xlabel('Time (s)')
-% 
+%
 % subplot(413)
 % plot(data(:, 1), Data(velocity_nostril_center));
 % title('velocity of the nostril')
 % legend({'velocity x', 'velocity y'})
 % xlabel('Time (s)')
-% 
+%
 % subplot(414)
 % plot(data(:, 1), Data(acceleration_nostril_center))
 % title('Acceleration of the nostril')
@@ -408,25 +582,25 @@ end
 % %% f4: put everything together (eye + pupil)
 % set(0, 'CurrentFigure', f4)
 % sgtitle([Session_params.animal_name '. Session: ' Session_params.session_selection], 'FontWeight', 'bold')
-% 
+%
 % if exist('REMEpoch')
 %     observed_rem_start = Start(REMEpoch);
 %     observed_rem_end = End(REMEpoch);
 % end
-% 
+%
 % % pupil center x
 % axp1 = subplot(5, 1, 1);
 % temp_data = Data(pupil_center);
 % plot(data(:, 1), temp_data(:, 1))
 % title('pupil center_x')
 % xlabel('Time (s)')
-% 
+%
 % % pupil center y
 % axp2 = subplot(5, 1, 2);
 % plot(data(:, 1), temp_data(:, 2))
 % title('pupil center_y')
 % xlabel('Time (s)')
-% 
+%
 % % pupil and eye areas
 % axp3 = subplot(5, 1, 3);
 % plot(data(:, 1), zscore(Data(areas_pupil)))
@@ -435,22 +609,22 @@ end
 % title('pupil and eye areas (zscored)')
 % legend({'pupil', 'eye'})
 % xlabel('Time (s)')
-% 
+%
 % % pupil velocity x
 % axp4 = subplot(5, 1, 4);
 % temp_data = Data(velocity_pupil_center);
 % plot(data(:, 1), temp_data(:, 1))
 % title('pupil velocity_x')
 % xlabel('Time (s)')
-% 
+%
 % % pupil velocity y
 % axp5 = subplot(5, 1, 5);
 % plot(data(:, 1), temp_data(:, 2))
 % title('pupil velocity_y')
 % xlabel('Time (s)')
-% 
+%
 % subplot_list = [axp1 axp2 axp3 axp4 axp5];
-% 
+%
 % % try
 % %     load(fullfile(datapath, 'SleepScoring_OBGamma.mat'), 'REMEpoch')
 % %     rem_start = Start(REMEpoch)/1e4;
@@ -468,40 +642,40 @@ end
 % %         clear j
 % %     end
 % % end
-% 
+%
 % %% f5: put everything together (nostril)
 % set(0, 'CurrentFigure', f5)
 % sgtitle([Session_params.animal_name '. Session: ' Session_params.session_selection], 'FontWeight', 'bold')
-% 
+%
 % % nostril center x
 % axn1 = subplot(5, 1, 1);
 % temp_data = Data(nostril_center);
 % plot(data(:, 1), temp_data(:, 1))
 % title('nostril center_x')
-% 
+%
 % % nostril center y
 % axn2 = subplot(5, 1, 2);
 % plot(data(:, 1), temp_data(:, 2))
 % title('nostril center_y')
-% 
+%
 % % nostril areas
 % axn3 = subplot(5, 1, 3);
 % plot(data(:, 1), Data(areas_nostril))
 % title('nostril area')
-% 
+%
 % % nostril velocity x
 % axn4 = subplot(5, 1, 4);
 % temp_data = Data(velocity_nostril_center);
 % plot(data(:, 1), temp_data(:, 1))
 % title('nostril velocity_x')
-% 
+%
 % % nostril velocity y
 % axn5 = subplot(5, 1, 5);
 % plot(data(:, 1), temp_data(:, 2))
 % title('nostril velocity_y')
-% 
+%
 % subplot_list = [axn1 axn2 axn3 axn4 axn5];
-% 
+%
 % % % plot REM episodes
 % % if exist('REMEpoch')
 % %     for i = 1:size(subplot_list, 2)
@@ -512,25 +686,25 @@ end
 % %         clear j
 % %     end
 % % end
-% 
+%
 % %% Save figures
 % figFolder = fullfile(datapath, 'DLC/Figures');
 % if ~exist(figFolder, 'dir')
 %     mkdir(figFolder);
 % end
-% 
+%
 % saveas(f1, fullfile(figFolder, [Session_params.animal_name '_eye_nostril_' Session_params.session_selection]), 'svg')
 % saveas(f1, fullfile(figFolder, [Session_params.animal_name '_eye_nostril_' Session_params.session_selection]), 'png')
-% 
+%
 % saveas(f2, fullfile(figFolder, [Session_params.animal_name 'eye_nostril_areas_' Session_params.session_selection]), 'svg')
 % saveas(f2, fullfile(figFolder, [Session_params.animal_name 'eye_nostril_areas_' Session_params.session_selection]), 'png')
-% 
+%
 % saveas(f3, fullfile(figFolder, [Session_params.animal_name 'eye_nostril_velocity_' Session_params.session_selection]), 'svg')
 % saveas(f3, fullfile(figFolder, [Session_params.animal_name 'eye_nostril_velocity_' Session_params.session_selection]), 'png')
-% 
+%
 % saveas(f4, fullfile(figFolder, [Session_params.animal_name 'eye_pupil_all_' Session_params.session_selection]), 'svg')
 % saveas(f4, fullfile(figFolder, [Session_params.animal_name 'eye_pupil_all_' Session_params.session_selection]), 'png')
-% 
+%
 % saveas(f5, fullfile(figFolder, [Session_params.animal_name 'nostril_all_' Session_params.session_selection]), 'svg')
 % saveas(f5, fullfile(figFolder, [Session_params.animal_name 'nostril_all_' Session_params.session_selection]), 'png')
 

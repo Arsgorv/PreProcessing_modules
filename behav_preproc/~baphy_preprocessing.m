@@ -1,4 +1,7 @@
 function baphy_preprocessing(datapath)
+
+%% CURRENTLY NOT USED VERSION OF THE SCRIPT: 20260123 AG
+
 % BEWARE OF TWO ASSUMPTIONS:
 % 1. Hits of NoMotor Target trials are forced to be NaN instead of 0 to avoid artificially decreasing hit rate
 % 2. Hits of Early Target trials are forced to be 1 instead of 0 to avoid artificially decreasing hit rate

@@ -52,6 +52,7 @@ switch animal_name
         cfg.respi    = [];
         cfg.heart    = [];
         cfg.OneBox   = [];
+        cfg.baphy_train_gap_s = 0.10;
     case {'Chabichou'}
         cfg.fus_ch   = [];
         cfg.baphy_ch = [];
@@ -60,6 +61,7 @@ switch animal_name
         cfg.respi    = [];
         cfg.heart    = [];  
         cfg.OneBox   = [];
+        cfg.baphy_train_gap_s = 0.10;
     case {'Tvorozhok'} % training
         cfg.fus_ch   = [];
         cfg.respi    = 19;
@@ -68,6 +70,7 @@ switch animal_name
         cfg.baphy_ch = 22;
         cfg.face_ch  = 23;
         cfg.eye_ch   = 24;
+        cfg.baphy_train_gap_s = 0.10;
 %     case {'Tvorozhok'} % React Active
 %         cfg.fus_ch   = [];
 %         cfg.baphy_ch = NaN;
@@ -84,6 +87,7 @@ switch animal_name
         cfg.respi    = [];
         cfg.heart    = 26;   
         cfg.OneBox   = [];        
+        cfg.baphy_train_gap_s = 0.10;
     case {'Mochi'} % training
         cfg.fus_ch   = [];
         cfg.respi    = 19;
@@ -92,6 +96,7 @@ switch animal_name
         cfg.baphy_ch = 22;
         cfg.face_ch  = 23;
         cfg.eye_ch   = 24;
+        cfg.baphy_train_gap_s = 0.10;
 %     case {'Mochi'} % React Active
 %         cfg.fus_ch   = [];
 %         cfg.baphy_ch = NaN;
@@ -108,6 +113,7 @@ switch animal_name
         cfg.baphy_ch = 22;
         cfg.face_ch  = 23;
         cfg.eye_ch   = 24;
+        cfg.baphy_train_gap_s = 0.10;
     case {'Ficello'}
         cfg.fus_ch   = NaN;
         cfg.baphy_ch = NaN;
@@ -115,6 +121,7 @@ switch animal_name
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
         cfg.heart    = NaN;        
+        cfg.baphy_train_gap_s = 0.10;
     case {'Kiri'}
         cfg.fus_ch   = NaN;
         cfg.baphy_ch = NaN;
@@ -122,6 +129,7 @@ switch animal_name
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
         cfg.heart    = NaN;        
+        cfg.baphy_train_gap_s = 0.10;
     otherwise
         cfg.fus_ch   = NaN;
         cfg.baphy_ch = NaN;
@@ -129,6 +137,7 @@ switch animal_name
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
         cfg.heart    = NaN;        
+        cfg.baphy_train_gap_s = NaN;
 end
 
 % -------------------------------------------------------------------------
