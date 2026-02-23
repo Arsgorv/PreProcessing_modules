@@ -42,8 +42,8 @@ for count = 1:3
         if size(tmp,2) ~= 128
             tmp = permute(tmp, [2 1 3]);
         end
-        % Kosichka: 4D (x,y,time,slice) after permutation
-    elseif contains(datapath, 'Kosichka')
+        % Kosichka/Ficello: 4D (x,y,time,slice) after permutation
+    elseif contains(datapath, 'Kosichka') || contains(datapath, 'Ficello')
         if size(tmp,1) ~= 102
             tmp = permute(tmp, [3 1 4 2]);
         end
@@ -69,12 +69,12 @@ if contains(datapath, 'Edel') || contains(datapath, 'Chabichou')
     Nx = size(data{1},1);
     Ny = size(data{1},2);
     
-    % raw_data: x × y × time × phase(3)
+    % raw_data: x ï¿½ y ï¿½ time ï¿½ phase(3)
     temp_data = nan(Nx, Ny, maxT, 3, 'single');
     
     for count = 1:3
         padLength = maxT - epochDuration(count);
-        tmp = data{count}; % Nx × Ny × T
+        tmp = data{count}; % Nx ï¿½ Ny ï¿½ T
         
         if padLength > 0
             tmp = cat(3, tmp(:,:,1:epochDuration(count)), ...
@@ -90,14 +90,14 @@ if contains(datapath, 'Edel') || contains(datapath, 'Chabichou')
     % Concatenate phases in the order [3 1 2] -> already in count=1..3
     raw_data = cat(3, temp_data(:,:,:,1), ...
         temp_data(:,:,:,2), ...
-        temp_data(:,:,:,3));   % Nx × Ny × (3*maxT)
+        temp_data(:,:,:,3));   % Nx ï¿½ Ny ï¿½ (3*maxT)
     
     Nt_all = size(raw_data,3);
     Fs = 2.5; % frames per second
     tvec = linspace(0, (Nt_all/Fs)*1e4, Nt_all)';
     
-    M_perm = permute(raw_data, [3 1 2]);      % T × X × Y
-    data2D = reshape(M_perm, Nt_all, Nx*Ny);    % T × (X*Y)
+    M_perm = permute(raw_data, [3 1 2]);      % T ï¿½ X ï¿½ Y
+    data2D = reshape(M_perm, Nt_all, Nx*Ny);    % T ï¿½ (X*Y)
     
     tsd_raw.data = tsd(tvec, data2D);
     tsd_raw.Nx = Nx;
@@ -108,8 +108,8 @@ if contains(datapath, 'Edel') || contains(datapath, 'Chabichou')
     save([datapath filesep 'fUS' filesep 'RP_data_' tail '_slice_A.mat'], ...
         'tsd_raw', '-v7.3');
     
-% Build raw_data and tsd per slice for Kosichka (4D: x,y,time,slice)
-elseif contains(datapath, 'Kosichka')
+% Build raw_data and tsd per slice for Kosichka and Ficello (4D: x,y,time,slice)
+elseif contains(datapath, 'Kosichka') || contains(datapath, 'Ficello')
     
     Nx = size(data{1},1);
     Ny = size(data{1},2);
@@ -117,7 +117,7 @@ elseif contains(datapath, 'Kosichka')
     
     if Nslices ~= 4
         warning('make_raw_data:UnexpectedSlices', ...
-            'Kosichka: expected 4 slices, found %d', Nslices);
+            'Kosichka/Ficello: expected 4 slices, found %d', Nslices);
     end
     
     % build and save raw_data + tsd per slice
@@ -126,12 +126,12 @@ elseif contains(datapath, 'Kosichka')
     tail = regexp(datapath, '[^\\\/]+$', 'match', 'once');
     
     for s = 1:Nslices
-        % raw_slice: x × y × time × phase(3)
+        % raw_slice: x ï¿½ y ï¿½ time ï¿½ phase(3)
         raw_slice = nan(Nx, Ny, maxT, 3, 'single');
         
         for count = 1:3
             padLength = maxT - epochDuration(count);
-            % select current slice: Nx × Ny × T
+            % select current slice: Nx ï¿½ Ny ï¿½ T
             tmp = data{count}(:,:,:,s);
             
             if padLength > 0
@@ -147,14 +147,14 @@ elseif contains(datapath, 'Kosichka')
         % concatenate phases along time: Pre/Exp/Post according to file_order
         raw_data = cat(3, raw_slice(:,:,:,1), ...
             raw_slice(:,:,:,2), ...
-            raw_slice(:,:,:,3));   % Nx × Ny × (3*maxT)
+            raw_slice(:,:,:,3));   % Nx ï¿½ Ny ï¿½ (3*maxT)
         
         Nt_all = size(raw_data,3);
         Fs = 2.5; % frames per second
         tvec = linspace(0, (Nt_all/Fs)*1e4, Nt_all)';
         
-        M_perm = permute(raw_data, [3 1 2]);      % T × X × Y
-        data2D = reshape(M_perm, Nt_all, Nx*Ny);    % T × (X*Y)
+        M_perm = permute(raw_data, [3 1 2]);      % T ï¿½ X ï¿½ Y
+        data2D = reshape(M_perm, Nt_all, Nx*Ny);    % T ï¿½ (X*Y)
         
         tsd_raw.data = tsd(tvec, data2D);
         tsd_raw.Nx = Nx;
