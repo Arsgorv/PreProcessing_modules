@@ -10,7 +10,7 @@ function QC = RA_sanity_check_datasync_active(datapath, varargin)
 % -------------------- defaults --------------------
 SaveFig = true;
 OutDir = fullfile(datapath, 'stim', 'sanity');
-FigVisible = 'on';
+FigVisible = 'off';
 
 ArrLagNom = 3.95;     % seconds, expected spout arrival (trial-relative)
 ArrLagTol = 0.50;     % seconds

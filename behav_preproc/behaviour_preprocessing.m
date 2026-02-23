@@ -56,31 +56,88 @@ end
 
 % Get number of frames from the synchronized data
 
-nframes{1} = size(data{1}, 1); nframes{2} = size(data{2}, 1);
+nframes{1} = size(data{1}, 1);
+nframes{2} = size(data{2}, 1);
 fprintf('Face frames: %d\nEye frames: %d\n', nframes{1}, nframes{2});
 
+%% Determine DLC layouts from column count (time + frame + 3*nbp)
+[layoutFace, idxFace] = dlc_layout_from_synced(data{1}, 'FACE');
+[layoutEye , idxEye ] = dlc_layout_from_synced(data{2}, 'EYE');
+
 %% Extract Tracking Coordinates
-% Face cam
-implant_x   = data{1}(:, 3:3:6);  implant_y   = data{1}(:, 4:3:7);
-ear_x       = data{1}(:, 9:3:15); ear_y       = data{1}(:,10:3:16);
-pupil_004_x = data{1}(:,18:3:39); pupil_004_y = data{1}(:,19:3:40);
-eye_004_x   = data{1}(:,42:3:63); eye_004_y   = data{1}(:,43:3:64);
-cheek_x     = data{1}(:,66:3:75); cheek_y     = data{1}(:,67:3:76);
-nostril_x   = data{1}(:,78:3:87); nostril_y   = data{1}(:,79:3:88);
-nose_x      = data{1}(:,[78,90:3:93]); nose_y  = data{1}(:,[79,91:3:94]);
-jaw_x       = data{1}(:,96);      jaw_y       = data{1}(:,97);
-tongue_x    = data{1}(:,99);      tongue_y    = data{1}(:,100);
-spout_x    = data{1}(:,102);      spout_y    = data{1}(:,103); spout_likelihood = data{1}(:, 104);
+% % Face cam
+% implant_x   = data{1}(:, 3:3:6);  implant_y   = data{1}(:, 4:3:7);
+% ear_x       = data{1}(:, 9:3:15); ear_y       = data{1}(:,10:3:16);
+% pupil_004_x = data{1}(:,18:3:39); pupil_004_y = data{1}(:,19:3:40);
+% eye_004_x   = data{1}(:,42:3:63); eye_004_y   = data{1}(:,43:3:64);
+% cheek_x     = data{1}(:,66:3:75); cheek_y     = data{1}(:,67:3:76);
+% nostril_x   = data{1}(:,78:3:87); nostril_y   = data{1}(:,79:3:88);
+% nose_x      = data{1}(:,[78,90:3:93]); nose_y  = data{1}(:,[79,91:3:94]);
+% jaw_x       = data{1}(:,96);      jaw_y       = data{1}(:,97);
+% tongue_x    = data{1}(:,99);      tongue_y    = data{1}(:,100);
+% spout_x    = data{1}(:,102);      spout_y    = data{1}(:,103); spout_likelihood = data{1}(:, 104);
+% 
+% % Eye cam
+% % general super model indexing
+% % pupil_007_x = data{2}(:,18:3:39); pupil_007_y = data{2}(:,19:3:40);
+% % eye_007_x   = data{2}(:,42:3:63); eye_007_y   = data{2}(:,43:3:64);
+% 
+% % small model indexing
+% pupil_007_x = data{2}(:,3:3:24); pupil_007_y = data{2}(:,4:3:25);
+% eye_007_x   = data{2}(:,27:3:48); eye_007_y   = data{2}(:,28:3:49);
+% 
+% 
+% center_body_parts = { ...
+%     'pupil_004', 'pupil_center_004'; ...
+%     'nostril',   'nostril_center'; ...
+%     'nose',      'nose_center'; ...
+%     'cheek',     'cheek_center'; ...
+%     'ear',       'ear_center'; ...
+%     };
 
-% Eye cam
-% general super model indexing
-% pupil_007_x = data{2}(:,18:3:39); pupil_007_y = data{2}(:,19:3:40);
-% eye_007_x   = data{2}(:,42:3:63); eye_007_y   = data{2}(:,43:3:64);
+% -------- FACE cam (expects FULL layout) --------
+implant_x   = dlc_get_xy(data{1}, idxFace.implant);
+implant_y   = dlc_get_xy(data{1}, idxFace.implant, 'y');
+ear_x       = dlc_get_xy(data{1}, idxFace.ear);
+ear_y       = dlc_get_xy(data{1}, idxFace.ear, 'y');
 
-% small model indexing
-pupil_007_x = data{2}(:,3:3:24); pupil_007_y = data{2}(:,4:3:25);
-eye_007_x   = data{2}(:,27:3:48); eye_007_y   = data{2}(:,28:3:49);
+pupil_004_x = dlc_get_xy(data{1}, idxFace.pupil);
+pupil_004_y = dlc_get_xy(data{1}, idxFace.pupil, 'y');
 
+eye_004_x   = dlc_get_xy(data{1}, idxFace.eye);
+eye_004_y   = dlc_get_xy(data{1}, idxFace.eye, 'y');
+
+cheek_x     = dlc_get_xy(data{1}, idxFace.cheek);
+cheek_y     = dlc_get_xy(data{1}, idxFace.cheek, 'y');
+
+nostril_x   = dlc_get_xy(data{1}, idxFace.nostril);
+nostril_y   = dlc_get_xy(data{1}, idxFace.nostril, 'y');
+
+nose_x      = dlc_get_xy(data{1}, idxFace.nose);
+nose_y      = dlc_get_xy(data{1}, idxFace.nose, 'y');
+
+jaw_x       = dlc_get_xy(data{1}, idxFace.jaw);
+jaw_y       = dlc_get_xy(data{1}, idxFace.jaw, 'y');
+
+tongue_x    = dlc_get_xy(data{1}, idxFace.tongue);
+tongue_y    = dlc_get_xy(data{1}, idxFace.tongue, 'y');
+
+if isfield(idxFace,'spout') && ~isempty(idxFace.spout)
+    spout_x = dlc_get_xy(data{1}, idxFace.spout);
+    spout_y = dlc_get_xy(data{1}, idxFace.spout, 'y');
+    spout_likelihood = dlc_get_lh(data{1}, idxFace.spout);
+else
+    spout_x = nan(nframes{1},1);
+    spout_y = nan(nframes{1},1);
+    spout_likelihood = nan(nframes{1},1);
+end
+
+% -------- EYE cam (FULL or SMALL layout) --------
+pupil_007_x = dlc_get_xy(data{2}, idxEye.pupil);
+pupil_007_y = dlc_get_xy(data{2}, idxEye.pupil, 'y');
+
+eye_007_x   = dlc_get_xy(data{2}, idxEye.eye);
+eye_007_y   = dlc_get_xy(data{2}, idxEye.eye, 'y');
 
 center_body_parts = { ...
     'pupil_004', 'pupil_center_004'; ...
@@ -160,7 +217,7 @@ for i = 1:length(marker_centers)
     eval([marker_centers{i} '_mvt = mvt;']);
 end
 % Pupil center from eye cam
-pupil_center_007_mvt      = [0; sqrt(sum(diff(pupil_center_007).^2,2))];
+pupil_center_007_mvt = [0; sqrt(sum(diff(pupil_center_007).^2,2))];
 
 %% Implant-centered normalization Face 004 markers normalisation on per-session implant width
 implant_x_L = implant_x(:, 1); implant_x_R = implant_x(:, 2);
@@ -429,11 +486,6 @@ if isfield(Session_params,'do_plots') && Session_params.do_plots == 1
     end
     
 end
-
-
-
-
-
 
 %% Legacy figure
 % %% Plot figures

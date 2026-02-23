@@ -34,14 +34,14 @@ cam(2).serial = '24934007';
 cam(2).out_csv = fullfile(P.video_dir, 'synchronized_DLC_data_eye.csv');
 
 % Find all DLC filtered files once
-dlc_all = dir(fullfile(P.video_dir, '*.csv'));
-dlc_all = dlc_all(~contains({dlc_all.name}, '_filtered')); % exclude filtered
+dlc_all = dir(fullfile(P.video_dir, '*_filtered.csv'));
+% dlc_all = dlc_all(~contains({dlc_all.name}, '_filtered')); % exclude filtered
 if isempty(dlc_all)
     error('sync_behaviour_ephys:NoDLC', 'No DLC csv (non-filtered) found in %s', P.video_dir);
 end
 
 %% old
-%%% ----------- Part 1: Load and Process LFP Data (Openephys) -----------
+% %%% ----------- Part 1: Load and Process LFP Data (Openephys) -----------
 % % Load LFP data (here using different paths based on your datapath)
 % Session_params.plt = 0;
 % if contains(datapath, 'Shropshire')
@@ -78,7 +78,7 @@ end
 %     load(fullfile(datapath, 'ephys', 'LFPData', ['LFP' num2str(eye_07_lfp) '.mat']));
 %     LFP_ferret{eye_07_lfp} = LFP;    
 % end
-
+% 
 % % Define the time scales
 % time_lfp = Range(LFP_ferret{face_04_lfp}); % in ts
 % data_lfp = {Data(LFP_ferret{face_04_lfp}) ; Data(LFP_ferret{eye_07_lfp})};
@@ -265,8 +265,9 @@ for idx = 1:2
 %     end
 %     % For synchronization, use the trigger timestamps.
 %     time_trig{idx} = time_lfp(peak_indices);  % these are your openephys trigger times in ts
- 
-    
+%  
+%     
+
     %% ----------- Part 2: choose DLC file (handles multiple) -----------
     dlc_candidates = dlc_all(contains({dlc_all.name}, cam(idx).serial) & contains({dlc_all.name}, 'DLC'));
     if isempty(dlc_candidates)
@@ -286,7 +287,7 @@ for idx = 1:2
     for f = 1:numel(dlc_candidates)
         dlc_path = fullfile(P.video_dir, dlc_candidates(f).name);
         
-        if contains(dlc_path, '_filtered'), continue; end
+%         if contains(dlc_path, '_filtered'), continue; end
         data = csvread(dlc_path, 3);
         nFrames = size(data, 1);
 
@@ -319,17 +320,17 @@ for idx = 1:2
 %     % Set the DLC folder path
 %     dlc_path = fullfile(datapath, 'video');
 %     
-%     % Load video timestamps from the frames CSV (ground truth)
-%     video_file = dir(fullfile(dlc_path, '*frames.csv'));
-%     if isempty(video_file)
-%         error('No video frames CSV file found in %s', dlc_path);
-%     end
-%     video_filename = video_file(1).name;
-%     disp(['Video frames file: ' video_filename]);
-%     data_csv = csvread(fullfile(dlc_path, video_filename));
-%     
-%     nCSV = length(data_csv);
-%     fprintf('Number of video timestamps: %d\n', nCSV);
+% %     % Load video timestamps from the frames CSV (ground truth)
+% %     video_file = dir(fullfile(dlc_path, '*frames.csv'));
+% %     if isempty(video_file)
+% %         error('No video frames CSV file found in %s', dlc_path);
+% %     end
+% %     video_filename = video_file(1).name;
+% %     disp(['Video frames file: ' video_filename]);
+% %     data_csv = csvread(fullfile(dlc_path, video_filename));
+% %     
+% %     nCSV = length(data_csv);
+% %     fprintf('Number of video timestamps: %d\n', nCSV);
 %     
 %     % Load DLC tracking data (CSV file produced by DLC)
 %     dlc_file = dir(fullfile(dlc_path, '*_filtered.csv')); % Using the filtered (smoothed) file
@@ -356,7 +357,6 @@ for idx = 1:2
 %             [nFrames, nDims] = size(data);
 %         end
 %     end
-
     %% ----------- Part 3: load selected DLC and selected TTL train -----------
     data = csvread(best.dlc_path, 3);
     [nFrames, nDims] = size(data);
@@ -390,7 +390,7 @@ for idx = 1:2
     end   
     
 %% old ----------- Part 3: Interpolate DLC Data (if needed) -----------
-
+% 
 %     % Our goal: ensure that DLC tracking data has one row per video timestamp.
 %     % There is no way to know when exactly camera droped the frames, so we make
 %     % an important assumption that they are dropped uniformly along the whole
@@ -664,11 +664,11 @@ for idx = 1:2
 %     
 %     
 % end
-% % Save LFP-derived timing data for later use.
-% if exist(fullfile(datapath, 'video', 'DLC_data.mat'), 'file')
-%     save(fullfile(datapath, 'video', 'DLC_data.mat'), 'time_1st_trig', 'time_trig', '-append');
+% Save LFP-derived timing data for later use.
+% if exist(fullfile(datapath, 'video', 'DLC_data_old.mat'), 'file')
+%     save(fullfile(datapath, 'video', 'DLC_data_old.mat'), 'time_1st_trig', 'time_trig', '-append');
 % else
-%     save(fullfile(datapath, 'video', 'DLC_data.mat'), 'time_1st_trig', 'time_trig');
+%     save(fullfile(datapath, 'video', 'DLC_data_old.mat'), 'time_1st_trig', 'time_trig');
 % end
 
 end

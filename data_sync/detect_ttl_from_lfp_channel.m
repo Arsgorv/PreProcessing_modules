@@ -58,6 +58,27 @@ end
 thr_diff = dv_max / 3;
 rise_idx = find(dv >= thr_diff);   % in dv, so sample index = rise_idx+1
 
+% dv_pos = dv(dv > 0);
+% if isempty(dv_pos)
+%     warning('detect_ttl_from_lfp_channel:FlatSignal', ...
+%         'LFP channel %g has no positive edges (no dv>0).', lfp_chan);
+%     peak_time_ts = [];
+%     info = struct('n_raw', numel(v), 'n_events', 0);
+%     return
+% end
+% 
+% % robust threshold: median + k*MAD, with a percentile fallback
+% medp = median(dv_pos);
+% madp = median(abs(dv_pos - medp));
+% thr_diff = medp + 8 * madp;
+% 
+% % fallback if MAD is ~0 (quantized / clipped)
+% if ~isfinite(thr_diff) || thr_diff <= 0 || madp == 0
+%     thr_diff = 0.3 * prctile(dv_pos, 99.5);
+% end
+% 
+% rise_idx = find(dv >= thr_diff);   % in dv, so sample index = rise_idx+1
+
 if isempty(rise_idx)
     warning('detect_ttl_from_lfp_channel:NoEdges', ...
         'No edges detected on LFP channel %g.', lfp_chan);
@@ -80,7 +101,9 @@ if event_indices(end) ~= num_points
     event_indices = [event_indices, num_points];
 end
 
-num_events   = numel(event_indices) - 1;
+% num_events   = numel(event_indices) - 1;
+num_events   = numel(event_indices);
+
 peak_indices = nan(num_events, 1);
 peak_values  = nan(num_events, 1);
 
@@ -101,14 +124,44 @@ for i = 1:num_events
     peak_values(i)  = mx;
 end
 
-if any(diff(peak_indices) <= 0)
-    warning('detect_ttl_from_lfp_channel:NonMonotonicPeaks', ...
-        'Detected TTL peak indices are not strictly increasing.');
-end
 
-valid = ~isnan(peak_indices);
-peak_indices = peak_indices(valid);
-peak_values  = peak_values(valid);
+% 20260128 AG
+% threshold_event = 4;  % gap in samples in dv that separates events
+% num_points = numel(rise_idx);
+% 
+% % indices in rise_idx that start a new event
+% is_new = [true; diff(rise_idx(:)) > threshold_event];
+% start_idx = find(is_new);
+% 
+% num_events = numel(start_idx);
+% peak_indices = nan(num_events,1);
+% peak_values  = nan(num_events,1);
+% 
+% for i = 1:num_events
+%     idx_start = start_idx(i);
+%     if i < num_events
+%         idx_end = start_idx(i+1) - 1;
+%     else
+%         idx_end = num_points;
+%     end
+% 
+%     seg_idx   = rise_idx(idx_start:idx_end);  % indices in dv
+%     seg_idx_v = seg_idx + 1;                  % indices in v
+%     seg_vals  = v(seg_idx_v);
+% 
+%     [mx,k] = max(seg_vals);
+%     peak_indices(i) = seg_idx_v(k);
+%     peak_values(i)  = mx;
+% end
+% 
+% if any(diff(peak_indices) <= 0)
+%     warning('detect_ttl_from_lfp_channel:NonMonotonicPeaks', ...
+%         'Detected TTL peak indices are not strictly increasing.');
+% end
+% 
+% valid = ~isnan(peak_indices);
+% peak_indices = peak_indices(valid);
+% peak_values  = peak_values(valid);
 
 % ---- OPTIONAL OUTLIER REMOVAL (general, but can be disabled) ----------
 interpeak = diff(peak_indices);
@@ -133,6 +186,7 @@ info = struct();
 info.n_raw        = numel(v);
 info.n_events     = numel(peak_time_ts);
 info.dv_max       = dv_max;
+% info.dv_pos       = dv_pos;
 info.thr_diff     = thr_diff;
 info.n_rise_idx   = numel(rise_idx);
 info.n_outliers   = numel(out_idx);

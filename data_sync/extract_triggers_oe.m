@@ -120,8 +120,8 @@ for k = 1:numel(ttl_names)
         disp('Grouping TTL trains')
         gap_sec = 0.1; 
        
-        if exist('cfg','var') && isfield(cfg,'baphy_train_gap_s') && ~isempty(cfg.baphy_train_gap_s)
-            gap_s = cfg.baphy_train_gap_s;
+        if isfield(cfg,'baphy_train_gap_s') && ~isempty(cfg.baphy_train_gap_s)
+            gap_sec = cfg.baphy_train_gap_s;
         end
         % compress trains ? one start and one stop per trial
         if contains(cfg.project_hint, 'RP')
@@ -161,7 +161,7 @@ for k = 1:numel(ttl_names)
 %     trigOE.(ttl_name).n_frames  = info_det.n_events;
 %     trigOE.(ttl_name).n_trigs  = numel(trigOE.(ttl_name).t_raw_s(:));
 
-    fprintf('  %s: detected %d TTL peaks on ch%d\n', ttl_name, numel(peak_idx), ch);
+    fprintf('  %s: detected %d TTL peaks on ch%d\n', ttl_name, numel(t_peak_ts), ch);
 
     if cfg.plt
         figure('Name', ['TTL ' ttl_name],'Color','w');
