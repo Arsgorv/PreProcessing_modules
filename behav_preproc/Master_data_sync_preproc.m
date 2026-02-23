@@ -200,6 +200,7 @@ for sess = 1:numel(sessions)
         disp(getReport(ME,'basic'))
         continue
     end
+    close all
 end
 
 disp('Master_data_sync_preproc finished.')

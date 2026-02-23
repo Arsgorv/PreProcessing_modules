@@ -63,22 +63,29 @@ switch animal_name
         cfg.OneBox   = [];
         cfg.baphy_train_gap_s = 0.10;
     case {'Tvorozhok'} % training
-        cfg.fus_ch   = [];
-        cfg.respi    = 19;
-        cfg.heart    = 20;
-        cfg.OneBox   = [];
-        cfg.baphy_ch = 22;
-        cfg.face_ch  = 23;
-        cfg.eye_ch   = 24;
-        cfg.baphy_train_gap_s = 0.10;
-%     case {'Tvorozhok'} % React Active
-%         cfg.fus_ch   = [];
-%         cfg.baphy_ch = NaN;
-%         cfg.face_ch  = NaN;
-%         cfg.eye_ch   = NaN;
-%         cfg.respi    = NaN;
-%         cfg.heart    = NaN;
-%         cfg.OneBox   = NaN;         
+        if contains(datapath, 'training')
+            cfg.fus_ch   = [];
+            cfg.emg      = 6;
+            cfg.ob       = 12;
+            cfg.respi    = 19;
+            cfg.heart    = 20;
+            cfg.OneBox   = [];
+            cfg.baphy_ch = 22;
+            cfg.face_ch  = 23;
+            cfg.eye_ch   = 24;
+            cfg.baphy_train_gap_s = 0.10;
+        elseif contains(datapath, 'experiment')
+            cfg.fus_ch   = [];
+            cfg.emg      = 65;
+            cfg.ob       = 76;
+            cfg.respi    = 89;
+            cfg.heart    = 90;
+            cfg.OneBox   = 91;
+            cfg.baphy_ch = 92;
+            cfg.face_ch  = 93;
+            cfg.eye_ch   = 94;
+            cfg.baphy_train_gap_s = 0.10;
+        end
     case {'Kosichka'} % React Passive
         cfg.fus_ch   = 21;
         cfg.baphy_ch = 20;
@@ -90,6 +97,8 @@ switch animal_name
         cfg.baphy_train_gap_s = 0.10;
     case {'Mochi'} % training
         cfg.fus_ch   = [];
+        cfg.emg      = 5;
+        cfg.ob       = 15;
         cfg.respi    = 19;
         cfg.heart    = 20;
         cfg.OneBox   = [];
