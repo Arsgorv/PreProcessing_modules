@@ -14,6 +14,13 @@ for sess = 1:numel(sessions)
     end
 end
 
+%% Crop images
+
+for sess = 1:numel(sessions)
+    disp(['Working on ' sessions{sess}])
+    cropping_prior_to_alignment(sessions{sess});
+end
+
 %% Align frames within one session. Save data_cat
 plt = 0;
 for sess = 1:numel(sessions)

@@ -1,4 +1,4 @@
-function  [restored_data, shifts2, template2, options_nonrigid] = frames_alignment_AG(datapath, temp_data, plt, sess)
+function  [restored_data, shifts2, template2, options_nonrigid] = frames_alignment_AG(datapath, temp_data, plt, sess,  crop_cols, crop_rows)
 % Non-rigid motion correction of fUS frames using NoRMCorre.
 % temp_data: 3D matrix [x y time] for a single slice
 % plt:       0/1, show diagnostic plots and video
@@ -11,52 +11,58 @@ if nargin < 3
     sess = 1;
 end
 
+
+
 % Step 1: NoRMCorre arguments
 args = struct;
 args.normcorreFilterType = 'defaultSVD';
 args = normcorre_set_arguments_AG(args);
 
 % Step 2: interactive cropping
-bottom_adjust = 0;
-
-while bottom_adjust <= 0
-    figure;
-    imagesc(temp_data(:,:,1));
-    axis image; colormap hot;
-    title('Draw ROI (imrect), double-click to confirm');
-
-    roi = imrect;
-    wait(roi);
-    roiPosition = getPosition(roi);  % [x y width height]
-    close;
-
-    x_start  = round(roiPosition(1));
-    y_start  = round(roiPosition(2));
-    width    = round(roiPosition(3));
-    height   = round(roiPosition(4));
-
-    x_start = max(1, x_start);
-    y_start = max(1, y_start);
-
-    x_end = min(x_start + width  - 1, size(temp_data,2));
-    y_end = min(y_start + height - 1, size(temp_data,1));
-
-    crop_cols = x_start:x_end;
-    crop_rows = y_start:y_end;
-
-    left_adjust   = crop_cols(1) - 1;
-    right_adjust  = size(temp_data,2) - crop_cols(end);
-    top_adjust    = crop_rows(1) - 1;
-    bottom_adjust = size(temp_data,1) - crop_rows(end);
-
-    disp(['left margin:   ' num2str(left_adjust)]);
-    disp(['right margin:  ' num2str(right_adjust)]);
-    disp(['top margin:    ' num2str(top_adjust)]);
-    disp(['bottom margin: ' num2str(bottom_adjust)]);
-
-    if bottom_adjust <= 0
-        disp('bottom_adjust <= 0, please redraw ROI');
+if nargin < 5
+    bottom_adjust = 0;
+    
+    while bottom_adjust <= 0
+        figure;
+        imagesc(temp_data(:,:,1));
+        axis image; colormap hot;
+        title('Draw ROI (imrect), double-click to confirm');
+        
+        roi = imrect;
+        wait(roi);
+        roiPosition = getPosition(roi);  % [x y width height]
+        close;
+        
+        x_start  = round(roiPosition(1));
+        y_start  = round(roiPosition(2));
+        width    = round(roiPosition(3));
+        height   = round(roiPosition(4));
+        
+        x_start = max(1, x_start);
+        y_start = max(1, y_start);
+        
+        x_end = min(x_start + width  - 1, size(temp_data,2));
+        y_end = min(y_start + height - 1, size(temp_data,1));
+        
+        crop_cols = x_start:x_end;
+        crop_rows = y_start:y_end;
+        
+        left_adjust   = crop_cols(1) - 1;
+        right_adjust  = size(temp_data,2) - crop_cols(end);
+        top_adjust    = crop_rows(1) - 1;
+        bottom_adjust = size(temp_data,1) - crop_rows(end);
+        
+        disp(['left margin:   ' num2str(left_adjust)]);
+        disp(['right margin:  ' num2str(right_adjust)]);
+        disp(['top margin:    ' num2str(top_adjust)]);
+        disp(['bottom margin: ' num2str(bottom_adjust)]);
+        
+        if bottom_adjust <= 0
+            disp('bottom_adjust <= 0, please redraw ROI');
+        end
     end
+else
+    disp('Cropping already done!');
 end
 
 % Step 3: data for NoRMCorre

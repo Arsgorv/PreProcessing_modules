@@ -27,6 +27,12 @@ for s = 1:length(sliceLetters)
         warning('File %s does not contain tsd_raw. Skipping.', rpFile);
         continue;
     end
+    if isfield(S, 'crop_cols') & isfield(S, 'crop_rows')
+        % no need for interactive croping in this boucle
+        crop_cols = S.crop_cols;
+        crop_rows = S.crop_rows;
+    end
+    
     tsd_raw = S.tsd_raw;
 
     % tsd_raw: time x (Nx*Ny)
@@ -39,8 +45,17 @@ for s = 1:length(sliceLetters)
     movie_raw = reshape(D', Nx, Ny, T);
 
     % run alignment for this slice
-    [movie_cat, shifts2, template2, options_nonrigid] = ...
+    
+    if isfield(S, 'crop_cols') && isfield(S, 'crop_rows')
+        % no need for interactive croping in this boucle
+        crop_cols = S.crop_cols;
+        crop_rows = S.crop_rows;
+        [movie_cat, shifts2, template2, options_nonrigid] = ...
+        frames_alignment_AG(datapath, movie_raw, plt, s, crop_cols, crop_rows);
+    else 
+        [movie_cat, shifts2, template2, options_nonrigid] = ...
         frames_alignment_AG(datapath, movie_raw, plt, s);
+    end
 
     % back to tsd
     D_cat = reshape(permute(movie_cat, [3 1 2]), T, Nx*Ny);
