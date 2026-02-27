@@ -1,4 +1,4 @@
-function sync_behaviour_ephys(datapath)
+function sync_behaviour_ephys(datapath, runTag)
 %%%%%% Synchronization of video and OB (LFP) signal %%%%%%%%%
 % This function:
 %   1. Loads LFP data and extracts trigger timestamps.
@@ -8,6 +8,8 @@ function sync_behaviour_ephys(datapath)
 %   5. Computes delay between openephys and video start and aligns DLC data.
 
 %% Settings
+if nargin < 2, runTag = ''; end
+
 Session_params.plt = 1;            % 1 to enable sanity plots
 gap_sec_video = 1.0;               % gap between TTL trains to split recordings (seconds)
 max_allowed_mismatch = 200;        % warn if |TTL - frames| larger than this
@@ -23,15 +25,21 @@ if ~P.has_lfp
 end
 
 % Camera definitions (keep your serial logic, but centralized)
+outDir = P.video_dir;
+if ~isempty(runTag)
+    outDir = fullfile(P.video_dir, runTag);
+    if ~exist(outDir,'dir'), mkdir(outDir); end
+end
+
 cam(1).name = 'FACE';
 cam(1).ch   = cfg.face_ch;
 cam(1).serial = '24934004';
-cam(1).out_csv = fullfile(P.video_dir, 'synchronized_DLC_data_face.csv');
+cam(1).out_csv = fullfile(outDir, 'synchronized_DLC_data_face.csv');
 
 cam(2).name = 'EYE';
 cam(2).ch   = cfg.eye_ch;
 cam(2).serial = '24934007';
-cam(2).out_csv = fullfile(P.video_dir, 'synchronized_DLC_data_eye.csv');
+cam(2).out_csv = fullfile(outDir, 'synchronized_DLC_data_eye.csv');
 
 % Find all DLC filtered files once
 dlc_all = dir(fullfile(P.video_dir, '*_filtered.csv'));
@@ -269,52 +277,111 @@ for idx = 1:2
 %     
 
     %% ----------- Part 2: choose DLC file (handles multiple) -----------
+    % Candidates for this camera (+ optional phase filter)
     dlc_candidates = dlc_all(contains({dlc_all.name}, cam(idx).serial) & contains({dlc_all.name}, 'DLC'));
+    if ~isempty(runTag)
+        dlc_candidates = dlc_candidates(contains({dlc_candidates.name}, ['_' runTag]));
+    end
     if isempty(dlc_candidates)
-        warning('sync_behaviour_ephys:NoDLCForCam', 'No DLC csv (non-filtered) found for %s (serial %s)', cam(idx).name, cam(idx).serial);
+        warning('No DLC candidates for %s (%s) run=%s', cam(idx).name, cam(idx).serial, runTag);
         continue
     end
     
-    % Split TTL into trains (to handle multiple recordings in one LFP stream)
+    % TTL trains (all)
     [~, ~, infoTr] = group_ttl_trains(time_trig_all, gap_sec_video);
     nTrains = infoTr.n_trials;
-
-    % If everything is one train but you still have multiple DLC files, it’s fine.
-    % If multiple trains, we’ll pick the train whose pulse count best matches the DLC frames.
-
-    best = struct('score', inf, 'dlc_path', '', 'dlc_name', '', 'train_id', 1, 'nFrames', NaN, 'nTTL', NaN);
-
-    for f = 1:numel(dlc_candidates)
-        dlc_path = fullfile(P.video_dir, dlc_candidates(f).name);
+    trainIDs = 1:nTrains;
+    
+    % If runTag specified, allocate trains by file counts (Conditioning first, PostTest after)
+    if ~isempty(runTag)
+        all_cam = dlc_all(contains({dlc_all.name}, cam(idx).serial) & contains({dlc_all.name}, 'DLC'));
+        nCond = sum(contains({all_cam.name}, '_Conditioning'));
+        nPost = sum(contains({all_cam.name}, '_PostTest'));
         
-%         if contains(dlc_path, '_filtered'), continue; end
-        data = csvread(dlc_path, 3);
-        nFrames = size(data, 1);
-
-        % For each train, compute its TTL pulse count
-        for tr = 1:nTrains
-            nTTL = sum(infoTr.trial_id == tr);
-            score = abs(nTTL - nFrames);
-
-            if score < best.score
-                best.score = score;
-                best.dlc_path = dlc_path;
-                best.dlc_name = dlc_candidates(f).name;
-                best.train_id = tr;
-                best.nFrames = nFrames;
-                best.nTTL = nTTL;
-            end
+        if strcmpi(runTag,'Conditioning')
+            trainIDs = 1:min(nCond,nTrains);
+        elseif strcmpi(runTag,'PostTest')
+            a = min(nCond,nTrains) + 1;
+            b = min(nCond + nPost, nTrains);
+            trainIDs = a:b;
         end
     end
-
-    fprintf('[%s] Selected DLC: %s (frames=%d) ; Selected TTL train=%d (TTL=%d) ; mismatch=%d\n', ...
-        cam(idx).name, best.dlc_name, best.nFrames, best.train_id, best.nTTL, best.score);
-
-    if best.score > max_allowed_mismatch
-        warning('sync_behaviour_ephys:LargeMismatch', ...
-            '[%s] Large mismatch TTL vs DLC (%d). Check if you copied the right video/DLC files into this session folder.', ...
-            cam(idx).name, best.score);
+    
+    % sort DLC files by numeric suffix (_1/_2/...) so pairing is stable
+    dlc_candidates = sort_by_suffix(dlc_candidates, runTag);
+    
+    usedTrain = false(1,nTrains);
+    allSync = [];
+    
+    for f = 1:numel(dlc_candidates)
+        dlc_path = fullfile(P.video_dir, dlc_candidates(f).name);
+        data = csvread(dlc_path, 3);
+        nFrames = size(data,1);
+        
+        bestScore = inf; bestTrain = NaN; bestTTL = NaN;
+        
+        for tr = trainIDs
+            if tr < 1 || tr > nTrains, continue; end
+            if usedTrain(tr), continue; end
+            nTTL = sum(infoTr.trial_id == tr);
+            score = abs(nTTL - nFrames);
+            if score < bestScore
+                bestScore = score;
+                bestTrain = tr;
+                bestTTL = nTTL;
+            end
+        end
+        
+        if ~isfinite(bestTrain)
+            warning('[%s] No available TTL train for %s (run=%s)', cam(idx).name, dlc_candidates(f).name, runTag);
+            continue
+        end
+        usedTrain(bestTrain) = true;
+        
+        sel = (infoTr.trial_id == bestTrain);
+        time_trig = time_trig_all(sel);  % ts
+        nTTL = numel(time_trig);
+        
+        % interpolate DLC rows to TTL count if needed (your existing logic)
+        nCSV = nTTL;
+        nDims = size(data,2);
+        
+        if nCSV ~= nFrames
+            savedIndices = round(linspace(1, nCSV, nFrames));
+            dlcDataInterp = nan(nCSV, nDims);
+            for col = 1:nDims
+                dlcDataInterp(:, col) = interp1(time_trig(savedIndices), data(:, col), time_trig, 'linear', 'extrap');
+            end
+            data = dlcDataInterp;
+        end
+        
+        synchronizedData = [time_trig(:), data];
+        allSync = [allSync; synchronizedData];
+        
+        fprintf('[%s %s] %s -> train %d (TTL=%d frames=%d mismatch=%d)\n', ...
+            cam(idx).name, runTag, dlc_candidates(f).name, bestTrain, bestTTL, nFrames, bestScore);
     end
+
+    if isempty(allSync)
+        warning('[%s] Empty synchronized output (run=%s)', cam(idx).name, runTag);
+        continue
+    end
+    
+    % enforce monotonic time
+    [~,o] = sort(allSync(:,1));
+    allSync = allSync(o,:);
+    
+    csvwrite(cam(idx).out_csv, allSync);
+    fprintf('Saved: %s\n', cam(idx).out_csv);
+
+%     fprintf('[%s] Selected DLC: %s (frames=%d) ; Selected TTL train=%d (TTL=%d) ; mismatch=%d\n', ...
+%         cam(idx).name, best.dlc_name, best.nFrames, best.train_id, best.nTTL, best.score);
+% 
+%     if best.score > max_allowed_mismatch
+%         warning('sync_behaviour_ephys:LargeMismatch', ...
+%             '[%s] Large mismatch TTL vs DLC (%d). Check if you copied the right video/DLC files into this session folder.', ...
+%             cam(idx).name, best.score);
+%     end
 
 %% old    
 %     % Set the DLC folder path
@@ -358,37 +425,37 @@ for idx = 1:2
 %         end
 %     end
     %% ----------- Part 3: load selected DLC and selected TTL train -----------
-    data = csvread(best.dlc_path, 3);
-    [nFrames, nDims] = size(data);
-
-    sel_pulses = (infoTr.trial_id == best.train_id);
-    time_trig = time_trig_all(sel_pulses);
-    nTTL = numel(time_trig);
-
-    disp(['# OpenEphys triggers (selected train) - # DLC frames = ' num2str(nTTL - nFrames)]);
-
+%     data = csvread(best.dlc_path, 3);
+%     [nFrames, nDims] = size(data);
+% 
+%     sel_pulses = (infoTr.trial_id == best.train_id);
+%     time_trig = time_trig_all(sel_pulses);
+%     nTTL = numel(time_trig);
+% 
+%     disp(['# OpenEphys triggers (selected train) - # DLC frames = ' num2str(nTTL - nFrames)]);
+% 
     %% ----------- Part 4: interpolate DLC to TTL count  -----------
-    nCSV = nTTL;
-
-    if nCSV ~= nFrames
-        fprintf('Mismatch detected: TTL pulses = %d, DLC frames = %d. Interpolating DLC...\n', nCSV, nFrames);
-
-        savedIndices = round(linspace(1, nCSV, nFrames));
-        if numel(unique(savedIndices)) < numel(savedIndices)
-            warning('Duplicate indices in mapping. Consider adjusting gap_sec_video or checking TTL detection.');
-        end
-
-        dlcDataInterp = nan(nCSV, nDims);
-        for col = 1:nDims
-            dlcDataInterp(:, col) = interp1(time_trig(savedIndices), data(:, col), time_trig, 'linear', 'extrap');
-        end
-        data = dlcDataInterp;
-        fprintf('DLC data interpolated to %d rows.\n', size(data,1));
-    else
-        fprintf('Frame counts match; no interpolation needed.\n');
-        savedIndices = (1:nCSV)';
-    end   
-    
+%     nCSV = nTTL;
+% 
+%     if nCSV ~= nFrames
+%         fprintf('Mismatch detected: TTL pulses = %d, DLC frames = %d. Interpolating DLC...\n', nCSV, nFrames);
+% 
+%         savedIndices = round(linspace(1, nCSV, nFrames));
+%         if numel(unique(savedIndices)) < numel(savedIndices)
+%             warning('Duplicate indices in mapping. Consider adjusting gap_sec_video or checking TTL detection.');
+%         end
+% 
+%         dlcDataInterp = nan(nCSV, nDims);
+%         for col = 1:nDims
+%             dlcDataInterp(:, col) = interp1(time_trig(savedIndices), data(:, col), time_trig, 'linear', 'extrap');
+%         end
+%         data = dlcDataInterp;
+%         fprintf('DLC data interpolated to %d rows.\n', size(data,1));
+%     else
+%         fprintf('Frame counts match; no interpolation needed.\n');
+%         savedIndices = (1:nCSV)';
+%     end   
+%     
 %% old ----------- Part 3: Interpolate DLC Data (if needed) -----------
 % 
 %     % Our goal: ensure that DLC tracking data has one row per video timestamp.
@@ -427,10 +494,10 @@ for idx = 1:2
 % %     
 
     %% ----------- Part 5: write output -----------
-    synchronizedData = [time_trig(:), data];
-
-    csvwrite(cam(idx).out_csv, synchronizedData);
-    fprintf('Saved: %s\n', cam(idx).out_csv);
+%     synchronizedData = [time_trig(:), data];
+% 
+%     csvwrite(cam(idx).out_csv, synchronizedData);
+%     fprintf('Saved: %s\n', cam(idx).out_csv);
 
     %% ----------- Part 6: sanity plots (kept, fixed units) -----------
     if Session_params.plt == 1
@@ -672,4 +739,17 @@ for idx = 1:2
 % end
 
 end
+end
+
+function d = sort_by_suffix(d, runTag)
+% sorts files so: ..._Conditioning, ..._Conditioning_1, ..._Conditioning_2 ...
+if isempty(d), return; end
+k = zeros(numel(d),1);
+for i = 1:numel(d)
+    nm = d(i).name;
+    tok = regexp(nm, ['_' runTag '_(\d+)'], 'tokens','once');
+    if isempty(tok), k(i) = 0; else, k(i) = str2double(tok{1}); end
+end
+[~,ord] = sort(k);
+d = d(ord);
 end

@@ -146,17 +146,6 @@ for sess = 1:numel(sessions)
                 Baphy = struct();
                 if exist('BC','var'), Baphy.Conditioning = BC; end
                 if exist('BP','var'), Baphy.PostTest     = BP; end
-                
-                % Provide a legacy-compatible total trial count (used by regularize/checks/summary)
-                Baphy.n_trials = 0;
-                if isfield(Baphy,'Conditioning') && isfield(Baphy.Conditioning,'n_trials')
-                    Baphy.n_trials = Baphy.n_trials + Baphy.Conditioning.n_trials;
-                end
-                if isfield(Baphy,'PostTest') && isfield(Baphy.PostTest,'n_trials')
-                    Baphy.n_trials = Baphy.n_trials + Baphy.PostTest.n_trials;
-                end
-                
-                Baphy.isRAexp = true;
             end
             
             
@@ -241,7 +230,7 @@ for sess = 1:numel(sessions)
                 end
                 
                 % n_baphy: from Baphy metadata
-                n_baphy = get_baphy_n_trials_any(Baphy);
+                n_baphy = Baphy.n_trials;
                 
                 check_trial_counts(n_oe, n_baphy, n_csv, datapath, 'RP_passive');
                 
@@ -635,22 +624,6 @@ for f = 1:numel(fn)
             Eout.(name) = vertcat(vals{:});
         end
     end
-end
-end
-
-function n = get_baphy_n_trials_any(B)
-n = [];
-if isstruct(B) && isfield(B,'n_trials') && isnumeric(B.n_trials) && ~isempty(B.n_trials)
-    n = B.n_trials;
-    return
-end
-if isstruct(B) && isfield(B,'Conditioning') && isfield(B.Conditioning,'n_trials')
-    n = 0;
-    n = n + double(B.Conditioning.n_trials);
-    if isfield(B,'PostTest') && isfield(B.PostTest,'n_trials')
-        n = n + double(B.PostTest.n_trials);
-    end
-    return
 end
 end
 

@@ -1,18 +1,20 @@
-function behaviour_preprocessing(datapath)
+function behaviour_preprocessing(datapath, runTag)
 % This script computes basic parameters and generates figures from DLC tracking data.
 % It uses synchronized DLC data (with the time column aligned to openephys triggers)
 % so that the ephys (Brain/LFP) and video/DLC signals are on the same time base.
 
 %% Initialization
+if nargin < 2, runTag = ''; end
+
 [~, Session_params.session_selection, ~] = fileparts(datapath);
 
 Session_params.do_plots = 0;          % set 0 to skip QC plots
-Session_params.save_plots = 0;        % save pngs in video/
+Session_params.save_plots = 1;        % save pngs in video/
 Session_params.qc_subsample = 20;     % for scatter decimation
 Session_params.fig_visibility = 'on';
 
 Session_params.animal_name = 'Unknown';
-animals = {'Shropshire','Brynza','Labneh','Tvorozhok','Kosichka','Mochi','Edel','Chabichou','Ficello','Kiri','Brayon'};
+animals = {'Shropshire','Brynza','Labneh','Tvorozhok','Kosichka','Mochi','Edel','Chabichou','Ficello','Kiri','Brayon','Droujba'};
 for i=1:numel(animals)
     if contains(datapath, animals{i})
         Session_params.animal_name = animals{i};
@@ -23,18 +25,22 @@ end
 disp(['Processing session: '  Session_params.animal_name ' ' Session_params.session_selection]);
 
 %% Load DLC Synchronized Data
-dlc_file{1} = dir(fullfile(datapath, 'video', 'synchronized_DLC_data_face.csv'));
-dlc_file{2} = dir(fullfile(datapath, 'video', 'synchronized_DLC_data_eye.csv'));
+baseVid = fullfile(datapath,'video');
+if ~isempty(runTag), baseVid = fullfile(baseVid, runTag); end
+
+dlc_file{1} = dir(fullfile(baseVid, 'synchronized_DLC_data_face.csv'));
+dlc_file{2} = dir(fullfile(baseVid, 'synchronized_DLC_data_eye.csv'));
+
 if isempty(dlc_file{1}) || isempty(dlc_file{2})
-    error('One or both DLC files not found in %s/video', datapath);
+    error('One or both DLC files not found in %s\video', datapath);
 end
 
 filename{1} = dlc_file{1}.name;
 filename{2} = dlc_file{2}.name;
 disp(['DLC data face: ' filename{1} ' ; DLC data eye:' filename{2}])
 
-dataStruct{1} = importdata(fullfile(datapath, 'video', filename{1}));
-dataStruct{2} = importdata(fullfile(datapath, 'video', filename{2}));
+dataStruct{1} = importdata(fullfile(baseVid, filename{1}));
+dataStruct{2} = importdata(fullfile(baseVid, filename{2}));
 for k = 1:2
     if isstruct(dataStruct{k})
         data{k} = dataStruct{k}.data;
@@ -295,8 +301,10 @@ pupil_center_007_mvt = tsd(time_eye, pupil_center_007_mvt_norm);
 
 %% Save Processed Data
 % Save the computed tsd objects to a MAT file in the DLC folder.
+savePath = fullfile(datapath,'video');
+if ~isempty(runTag), savePath = fullfile(savePath, runTag); end
+if ~exist(savePath,'dir'), mkdir(savePath); end
 
-savePath = fullfile(datapath, 'video');
 
 if ~exist(fullfile(savePath, 'DLC_data.mat'), 'file')
     save(fullfile(savePath, 'DLC_data.mat'), ...

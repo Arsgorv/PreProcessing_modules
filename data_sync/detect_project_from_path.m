@@ -11,12 +11,12 @@ if isempty(project)
             || contains(datapath,'Tvorozhok') || contains(datapath,'Mochi')
         project = 'RA';
     elseif contains(datapath,'Tonotopy') || contains(datapath,'T_')
-        project = 'T';        
+        project = 'Tonotopy';        
     else
         error('Cannot infer project from datapath: %s', datapath);
     end
 end
-if ~any(strcmp(project,{'RP','RA', 'T'}))
-    error('project must be RP, RA or T');
+if ~any(strcmp(project,{'RP','RA', 'Tonotopy'}))
+    error('project must be RP, RA or Tonotopy');
 end
 end

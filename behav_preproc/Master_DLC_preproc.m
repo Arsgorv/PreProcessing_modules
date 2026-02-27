@@ -19,23 +19,44 @@ for sess = 1:length(session_dlc)
     datapath = session_dlc{sess};
     disp(['[behav_preproc] ' datapath])
     disp([num2str(numel(session_dlc)-sess+1) '/' num2str(numel(session_dlc)) ' left'])
-
-    % Synchronize LFP and DLC ; Produces synced timeline in DLC_data.mat
-    if opts.do_sync
-        disp('Syncing DLC and Ephys...')
-        sync_behaviour_ephys(datapath);
-    end
-
-    % Do the basic DLC pre-processing
-    if opts.do_basic_preproc
-        disp('Basic DLC preprocessing...')
-        behaviour_preprocessing(datapath);
-    end
     
-    % Do motion energy analysis
-    if opts.do_motion_energy
-        motion_energy(session_dlc{sess})
+    isRAexp = ~isempty(dir(fullfile(datapath,'ephys','*_RA_PreSleep*'))) || ...
+        ~isempty(dir(fullfile(datapath,'ephys','*_RA_PostTest*')));
+    
+    if ~isRAexp
+        if opts.do_sync
+            disp('Syncing DLC and Ephys...')
+            sync_behaviour_ephys(datapath);
+        end
+        if opts.do_basic_preproc
+            disp('Basic DLC preprocessing...')
+            behaviour_preprocessing(datapath); 
+        end
+        if opts.do_motion_energy
+            disp('Do motion energy preprocessing...')
+            motion_energy(datapath)
+        end
+    else
+        if opts.do_sync
+            % Synchronize LFP and DLC ; Produces synced timeline in DLC_data.mat
+            disp('Syncing DLC and Ephys...')
+            sync_behaviour_ephys(datapath,'Conditioning');
+            sync_behaviour_ephys(datapath,'PostTest');
+        end
+        if opts.do_basic_preproc
+            % Do the basic DLC pre-processing
+            disp('Basic DLC preprocessing...')
+            behaviour_preprocessing(datapath,'Conditioning');
+            behaviour_preprocessing(datapath,'PostTest');
+        end
+        if opts.do_motion_energy
+            % Do motion energy analysis            
+            disp('Do motion energy preprocessing...')
+            motion_energy(datapath,'Conditioning')
+            motion_energy(datapath,'PostTest')
+        end
     end
+
     
     % Check the quality of tracking on a short episode
     % range = [8 50];
