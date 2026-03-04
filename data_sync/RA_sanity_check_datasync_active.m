@@ -23,6 +23,9 @@ SmoothN = 20;         % samples for runmean on likelihood
 MaxTrialsHeatmap = 120;  % limit for likelihood heatmap
 NExampleTraces = 12;     % example trials shown as traces
 
+OutDir = fullfile(datapath, 'analysis', 'data_sync');
+RunTag = ''; % '' (default) or 'Conditioning' / 'PostTest'
+
 % -------------------- parse varargin --------------------
 if ~isempty(varargin)
     for k = 1:2:numel(varargin)
@@ -54,6 +57,8 @@ if ~isempty(varargin)
                 MaxTrialsHeatmap = val;
             case 'nexampletraces'
                 NExampleTraces = val;
+            case 'runtag'
+                RunTag = char(val);
 
             otherwise
                 error('Unknown parameter: %s', key);
@@ -61,50 +66,128 @@ if ~isempty(varargin)
     end
 end
 
+% -------------------- RA experiment auto-dispatch --------------------
+if isempty(RunTag)
+    msC = fullfile(datapath, 'Master_sync_Conditioning.mat');
+    msP = fullfile(datapath, 'Master_sync_PostTest.mat');
+    isRAexp = (exist(msC,'file')==2) || (exist(msP,'file')==2) || ...
+              (exist(fullfile(datapath,'analysis','run_manifest_RAexp.mat'),'file')==2);
+
+    if isRAexp
+        QC = struct();
+        if exist(msC,'file')==2
+            QC.Conditioning = RA_sanity_check_datasync_active(datapath, 'RunTag','Conditioning', 'SaveFig',SaveFig, 'FigVisible',FigVisible, 'OutDir',OutDir);
+        end
+        if exist(msP,'file')==2
+            QC.PostTest = RA_sanity_check_datasync_active(datapath, 'RunTag','PostTest', 'SaveFig',SaveFig, 'FigVisible',FigVisible, 'OutDir',OutDir);
+        end
+        return
+    end
+end
+
 % -------------------- load Master_sync + Baphy --------------------
-msfile = fullfile(datapath, 'Master_sync.mat');
+if isempty(RunTag)
+    msfile = fullfile(datapath, 'Master_sync.mat');
+else
+    msfile = fullfile(datapath, ['Master_sync_' RunTag '.mat']);
+end
 if ~exist(msfile,'file')
-    error('Master_sync.mat not found: %s', msfile);
+    error('Master sync not found: %s', msfile);
 end
 S = load(msfile);
 
+% -------------------- resolve Baphy --------------------
+B = [];
+
+% Case 1: stored as S.Baphy
 if isfield(S,'Baphy')
-    B = S.Baphy;
-else
-    bfile = fullfile(datapath, 'stim', 'Baphy_RA.mat');
-    if exist(bfile,'file')
-        Sb = load(bfile);
-        if isfield(Sb,'Baphy')
-            B = Sb.Baphy;
-        else
-            error('Baphy not found in %s', bfile);
+    Btmp = S.Baphy;
+    if ~isempty(RunTag) && isstruct(Btmp) && isfield(Btmp, RunTag)
+        B = Btmp.(RunTag);
+    else
+        B = Btmp;
+    end
+end
+
+% Case 2: stored as BC/BP (common in per-phase files)
+if isempty(B)
+    B = pick_first_field(S, {'BC','BP','BaphyC','BaphyP'});
+end
+
+% Case 3: load from stim folder (phase-specific first)
+if isempty(B)
+    if isempty(RunTag)
+        candidates = { ...
+            fullfile(datapath,'stim','Baphy_RA.mat') ...
+        };
+    else
+        candidates = { ...
+            fullfile(datapath,'stim',['Baphy_RA_' RunTag '.mat']), ...
+            fullfile(datapath,'stim','Baphy_RA.mat') ...
+        };
+    end
+
+    for i = 1:numel(candidates)
+        if exist(candidates{i},'file')==2
+            Sb = load(candidates{i});
+            if isfield(Sb,'Baphy')
+                B = Sb.Baphy;
+                break
+            elseif strcmpi(RunTag,'Conditioning') && isfield(Sb,'BC')
+                B = Sb.BC; break
+            elseif strcmpi(RunTag,'PostTest') && isfield(Sb,'BP')
+                B = Sb.BP; break
+            end
         end
-    else
-        error('Baphy not found in Master_sync.mat and %s missing', bfile);
     end
 end
 
-if ~isfield(S,'Epochs')
-    if isfield(S,'trigOE')
-        Epochs = RA_build_epochs_active(datapath, S.trigOE, B);
+if isempty(B)
+    if isempty(RunTag), rt = '(none)'; else, rt = RunTag; end
+    error('Baphy not found. Checked Master_sync fields and stim candidates for RunTag=%s', rt);
+end
+
+% -------------------- resolve Epochs --------------------
+Epochs = [];
+
+if isfield(S,'Epochs')
+    Etmp = S.Epochs;
+    if ~isempty(RunTag) && isstruct(Etmp) && isfield(Etmp, RunTag)
+        Epochs = Etmp.(RunTag);
     else
-        error('Epochs missing in Master_sync.mat and trigOE missing to rebuild.');
+        Epochs = Etmp;
     end
-else
-    Epochs = S.Epochs;
 end
 
-if isfield(S,'trigOE')
-    trigOE = S.trigOE;
-else
-    trigOE = struct();
+if isempty(Epochs)
+    Epochs = pick_first_field(S, {'EC','EP'});
 end
 
-if ~exist(OutDir,'dir')
-    mkdir(OutDir);
+% -------------------- resolve trigOE (run-specific) --------------------
+trigOE = pick_first_field(S, {'trigOE','trigC','trigP'});
+if isempty(trigOE), trigOE = struct(); end
+
+% Rebuild epochs if missing and possible (use RunTag so it loads correct DLC folder)
+if isempty(Epochs)
+    if ~isempty(fieldnames(trigOE))
+        Epochs = RA_build_epochs_active(datapath, trigOE, B, RunTag);
+    else
+        error('Epochs missing and no trigOE/trigC/trigP available to rebuild.');
+    end
 end
+
+if isempty(RunTag)
+    outdir_use = OutDir;
+else
+    outdir_use = fullfile(OutDir, RunTag);
+end
+if ~exist(outdir_use,'dir'), mkdir(outdir_use); end
 
 [~,sessname] = fileparts(datapath);
+sessLabel = sessname;
+if ~isempty(RunTag)
+    sessLabel = [sessname ' | ' RunTag];
+end
 
 % -------------------- assemble key times --------------------
 TsRate = 1e4;
@@ -257,7 +340,10 @@ else
         d = dir(fullfile(lfppath,'LFP*.mat'));
         if ~isempty(d)
             try
-                L = load(fullfile(lfppath, 'LFP22'));
+                d = dir(fullfile(lfppath,'LFP*.mat'));
+                if ~isempty(d)
+                    L = load(fullfile(d(1).folder, d(1).name));
+                end
                 if isfield(L,'LFP')
                     lfp = L.LFP;
                     lfp_t = Range(lfp,'s')/60;
@@ -332,14 +418,16 @@ yticklabels(labels);
 xlabel('Time (min)'); title('Stream coverage');
 grid on; box on;
 
-sgtitle(sprintf('RA sync sanity — %s', strrep(sessname,'_','\_')));
+sgtitle(sprintf('RA sync sanity — %s', strrep(sessLabel,'_','\_')));
 
 % ---- link x-axes (requested) ----
 linkaxes(ax1([1 4 6]), 'x');   % minutes panels
 linkaxes(ax1([2 3 5]), 'x');   % trial-index panels
 
-if SaveFig
-    saveas(f1, fullfile(OutDir, sprintf('%s_sanity1_global.png', sessname)));
+if isempty(RunTag)
+    saveas(f1, fullfile(outdir_use, sprintf('%s_sanity1_global.png', sessname)));
+else
+    saveas(f1, fullfile(outdir_use, sprintf('%s_%s_sanity1_global.png', sessname, RunTag)));
 end
 
 % -------------------- FIGURE 2: Behavior + spout QC --------------------
@@ -398,7 +486,11 @@ end
 % Panel 4: Spout likelihood heatmap aligned to trial start (interp1 unique fix)
 subplot(2,3,4); hold on;
 
-dlcfile = fullfile(datapath, 'video', 'DLC_data.mat');
+if isempty(RunTag)
+    dlcfile = fullfile(datapath, 'video', 'DLC_data.mat');
+else
+    dlcfile = fullfile(datapath, 'video', RunTag, 'DLC_data.mat');
+end
 if exist(dlcfile,'file')
     D = load(dlcfile, 'spout_likelihood');
     if isfield(D,'spout_likelihood') && ~isempty(D.spout_likelihood)
@@ -556,7 +648,11 @@ end
 % Panel 6: Hit rate / performance vs time with masks
 subplot(2,3,6); hold on;
 if isfield(B,'Perf') && isfield(B.Perf,'hit_rate_all') && ~isempty(B.Perf.hit_rate_all)
-    hr = B.Perf.hit_rate_all(1:n);
+    hr = B.Perf.hit_rate_all(:);
+    if numel(hr) < n
+        hr(end+1:n) = NaN;
+    end
+    hr = hr(1:n);
     plot(t_trial0/60, hr, '.', 'MarkerSize',10);
 
     m = isNoSound & isfinite(hr);
@@ -574,10 +670,12 @@ else
     text(0.1,0.5,'B.Perf.hit_rate_all not available.','Units','normalized');
 end
 
-sgtitle(sprintf('RA behavior + spout QC — %s', strrep(sessname,'_','\_')));
+sgtitle(sprintf('RA behavior + spout QC — %s', strrep(sessLabel,'_','\_')));
 
-if SaveFig
-    saveas(f2, fullfile(OutDir, sprintf('%s_sanity2_behavior_spout.png', sessname)));
+if isempty(RunTag)
+    saveas(f2, fullfile(outdir_use, sprintf('%s_sanity2_behavior_spout.png', sessname)));
+else
+    saveas(f2, fullfile(outdir_use, sprintf('%s_%s_sanity2_behavior_spout.png', sessname, RunTag)));
 end
 
 % -------------------- spout summary --------------------
@@ -590,4 +688,15 @@ QC.spout.recommendation = { ...
     'For analyses needing a single timing per condition: use median over detected trials (Ref/Tar separately) and keep a mask of detected vs missing.', ...
     'If you must impute per trial: fill missing with condition median ONLY for visualization/alignment and keep an "imputed" flag to exclude from stats.'};
 
+end
+
+function out = pick_first_field(S, names)
+out = [];
+for i = 1:numel(names)
+    nm = names{i};
+    if isfield(S, nm)
+        out = S.(nm);
+        return
+    end
+end
 end

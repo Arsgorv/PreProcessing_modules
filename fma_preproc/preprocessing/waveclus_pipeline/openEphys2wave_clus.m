@@ -1,78 +1,69 @@
-function openEphys2wave_clus(root,chLst,numChannels,CommonRefChannels)
-% root = '~/data5/CST/data-source/mozzarella/mozzarella_005_20241113/passive/mozzarella_CST_passive_2024-11-13_17-02-00_tci-slow/Record Node 101/experiment1/recording1/continuous/Rhythm_FPGA-100.0/';
-% chLst = 1:32; numChannels = 43;
+function openEphys2wave_clus(streamRoot,chLst,numChannels,CommonRefChannels, outDir, Fs)
+% openEphys2wave_clus
+% Convert one OpenEphys "continuous stream" (folder with continuous.dat) into wave_clus input,
+% run Get_spikes + Do_clustering per channel, and save outputs in outDir.
+%
+% streamRoot: .../recording1/continuous/Acquisition_Board-100.acquisition_board (folder containing continuous.dat)
+% outDir    : folder where C*.mat + wave_clus outputs will be written
 
-% root = '~/data5/Arsenii/OBG_AG/Shropshire/freely-moving/Shropshire_20241205/shropshire_2024-12-05_17-10-40_fm_TORCs/Record Node 101/experiment1/recording1/continuous/Rhythm_FPGA-100.0/';
-% chLst = 1:32; numChannels = 113;
-% openEphys2wave_clus(root,chLst,numChannels,CommonRefChannels);
-% Diplays session name
-% strLocus2 = strfind(root,'Record Node');
-% strLocus1 = find(root(1:(strLocus2-2))=='/',1,'last');
-% folderaddress = ['~/' root(strLocus1+1:strLocus2-2) '_ComRef' num2str(CommonRefChannels(1)) '-' num2str(CommonRefChannels(end)) ];
-folderaddress ='Z:\Arsenii\React_Passive_ephys\Raw_data\Kiri\Kiri_2026-01-08_17-20-02_test\Kiri_2026-01-08_17-20-02_test_ComRef1-32';
-disp(folderaddress);
-mkdir(folderaddress);
-cd(folderaddress);
+if nargin < 6 || isempty(Fs), Fs = 30000; end
+if nargin < 5 || isempty(outDir), outDir = pwd; end
+if nargin < 4, CommonRefChannels = []; end
 
-datFile = [root '\continuous.dat'];
-% numChannels = 43; % Nombre total de canaux
-samplingRate = 30000; % Exemple de fréquence d'échantillonnage, adapte selon ton setup
-bytesPerSample = 2; % int16 -> 2 octets
+if ~exist(outDir,'dir'), mkdir(outDir); end
+cd(outDir);
 
-% Création de la mémoire map pour charger les données
-dataInfo = dir(datFile); % Récupérer la taille du fichier
-numSamples = dataInfo.bytes / (numChannels * bytesPerSample); % Nombre total d'échantillons par canal
+datFile = fullfile(streamRoot, 'continuous.dat');
+if ~exist(datFile,'file')
+    error('openEphys2wave_clus:NoDat','Missing continuous.dat at %s', datFile);
+end
+
+bytesPerSample = 2; % int16
+info = dir(datFile);
+numSamples = info.bytes / (numChannels * bytesPerSample);
+numSamples = floor(numSamples);
+
 m = memmapfile(datFile, ...
     'Format', {'int16', [numChannels, numSamples], 'data'}, ...
     'Writable', false);
 
-if nargin<4; CommonRefChannels = []; end
-segmentSize = samplingRate*15; % Nombre d'échantillons à traiter par segment
+% --- compute common reference (optional) ---
+segmentSize = Fs * 15; % 15s segments
 if ~isempty(CommonRefChannels)
     disp('compute common ref...');
-    % Préallocation pour la somme et le comptage
-    commonRef = zeros(1, size(m.Data.data, 2)); % Taille en fonction de la longueur totale
+    commonRef = zeros(1, size(m.Data.data, 2), 'single');
     nSegments = ceil(size(m.Data.data, 2) / segmentSize);
-    
-    % Boucle de traitement par segments
-    for iSegment = 1:nSegments
-        startIdx = (iSegment-1)*segmentSize + 1;
-        endIdx = min(iSegment*segmentSize, size(m.Data.data, 2));
-        
-        % Charger le segment
-        dataSegment = m.Data.data(CommonRefChannels, startIdx:endIdx);
-        
-        % Insère la moyenne
-        commonRef(startIdx:endIdx) = mean(dataSegment, 1);
+    for iSeg = 1:nSegments
+        s0 = (iSeg-1)*segmentSize + 1;
+        s1 = min(iSeg*segmentSize, size(m.Data.data, 2));
+        x = double(m.Data.data(CommonRefChannels, s0:s1));
+        commonRef(s0:s1) = single(mean(x, 1));
+    end
+else
+    commonRef = [];
+end
+
+% --- per channel ---
+for cnum = chLst
+    fprintf('\nSaving raw channel %d\n', cnum);
+
+    x = double(m.Data.data(cnum, :));
+    if ~isempty(commonRef)
+        x = x - double(commonRef);
     end
 
-else
-    commonRef = 0;
-end
+    par = struct(); 
+    sr  = Fs;
+    data = x;
 
-for cnum = chLst
-    fprintf('\n Saving raw channel', cnum);
-    fprintf(' %d ', cnum);
-
-    % Extraction des données du canal spécifié
-    data = m.Data.data(cnum, :);
-    data = double(data) - commonRef;
-
-    % Ajout des métadonnées pour wave_clus
-    par = struct();
-    par.sr = samplingRate; % Fréquence d'échantillonnage
-    % Ajouter d'autres paramètres spécifiques à wave_clus si nécessaires
-    sr = samplingRate;
-    % Sauvegarder les données dans un fichier temporaire pour wave_clus
     rawdataSingleChannel = ['C' num2str(cnum) '.mat'];
-    save(rawdataSingleChannel, 'data', 'sr','-v7.3');
+    save(rawdataSingleChannel, 'data', 'sr', '-v7.3');
 
-    fprintf('\n Processing channel', cnum);
-    fprintf(' %d ', cnum);
-    rawdataSingleChannel = ['C' num2str(cnum) '.mat'];
+    fprintf('Processing channel %d\n', cnum);
     spikesSingleChannel = ['C' num2str(cnum) '_spikes.mat'];
-%     WAV_CLUS FUNCTIONS
-    Get_spikes(rawdataSingleChannel,'parallel',false);
-    Do_clustering(spikesSingleChannel,'parallel',false);
+
+    Get_spikes(rawdataSingleChannel, 'parallel', false);
+    Do_clustering(spikesSingleChannel, 'parallel', false);
 end
 
+end

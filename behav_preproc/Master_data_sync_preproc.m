@@ -120,6 +120,7 @@ for sess = 1:numel(sessions)
                         'Conditioning', 20, 5);  % blockGap_s=20, pad_s=5
                     
                     if ~isempty(BC)
+                        BC = RA_fix_baphy_trial_masks(BC);
                         Epochs.Conditioning = EC;
                         save(fullfile(datapath,'Master_sync_Conditioning.mat'), 'trigC','BC','EC','partsC');
                     end
@@ -131,6 +132,7 @@ for sess = 1:numel(sessions)
                         'PostTest', 20, 5);
                     
                     if ~isempty(BP)
+                        BP = RA_fix_baphy_trial_masks(BP);
                         Epochs.PostTest = EP;
                         save(fullfile(datapath,'Master_sync_PostTest.mat'), 'trigP','BP','EP','partsP');
                     end
@@ -144,8 +146,14 @@ for sess = 1:numel(sessions)
                 
                 % store a compact Baphy container (keeps compatibility: you still have per-phase mats)
                 Baphy = struct();
-                if exist('BC','var'), Baphy.Conditioning = BC; end
-                if exist('BP','var'), Baphy.PostTest     = BP; end
+                if exist('BC','var')
+                    BC = RA_fix_baphy_trial_masks(BC);
+                    Baphy.Conditioning = BC; 
+                end
+                if exist('BP','var')
+                    BP = RA_fix_baphy_trial_masks(BP);
+                    Baphy.PostTest     = BP;
+                end
                 
                 % Provide a legacy-compatible total trial count (used by regularize/checks/summary)
                 Baphy.n_trials = 0;
@@ -498,31 +506,111 @@ for i = 1:numel(Bparts)
 end
 Bout.n_trials = n;
 
-% stitch trial fields
+% stitch trial fields (numeric + logical + cell + string)
 if isfield(Bout,'trial') && isstruct(Bout.trial)
     fn = fieldnames(Bout.trial);
     for f = 1:numel(fn)
         name = fn{f};
+
         vals = cell(numel(Bparts),1);
-        okNum = true; okCell = true;
+        okNumLog = true;
+        okCell   = true;
+        okStr    = true;
+
         for i = 1:numel(Bparts)
-            v = Bparts{i}.trial.(name);
-            vals{i} = v;
-            okNum = okNum && isnumeric(v);
-            okCell = okCell && iscell(v);
-        end
-        if okNum
-            try
-                Bout.trial.(name) = vertcat(vals{:});
-            catch
+            if ~isfield(Bparts{i},'trial') || ~isfield(Bparts{i}.trial,name)
+                okNumLog = false; okCell = false; okStr = false;
+                break
             end
-        elseif okCell
-            try
+
+            v = Bparts{i}.trial.(name);
+
+            okNumLog = okNumLog && (isnumeric(v) || islogical(v));
+            okCell   = okCell   && iscell(v);
+            okStr    = okStr    && isstring(v);
+
+            % store as column for consistent vertcat
+            if isnumeric(v) || islogical(v) || isstring(v)
+                vals{i} = v(:);
+            elseif iscell(v)
+                vals{i} = v(:);
+            else
+                okNumLog = false; okCell = false; okStr = false;
+            end
+        end
+
+        try
+            if okNumLog
                 Bout.trial.(name) = vertcat(vals{:});
+            elseif okCell
+                Bout.trial.(name) = vertcat(vals{:});
+            elseif okStr
+                Bout.trial.(name) = vertcat(vals{:});
+            end
+        catch
+        end
+    end
+end
+
+% ensure trial_id matches stitched length
+Bout.trial_id = (1:Bout.n_trials)';
+
+% ---------------- stitch Perf fields (per-trial vectors) ----------------
+if isfield(Bout,'Perf') && isstruct(Bout.Perf)
+    nParts = numel(Bparts);
+    nPer = zeros(nParts,1);
+    for i = 1:nParts
+        nPer(i) = get_n_trials_safe(Bparts{i});
+    end
+
+    Pout = struct();
+    Pout.n_trials = Bout.n_trials;
+
+    pfn = fieldnames(Bparts{1}.Perf);
+    for f = 1:numel(pfn)
+        nm = pfn{f};
+
+        vals = cell(nParts,1);
+        okNumLog = true;
+        okCell   = true;
+        okStr    = true;
+        okLen    = true;
+
+        for i = 1:nParts
+            if ~isfield(Bparts{i},'Perf') || ~isfield(Bparts{i}.Perf,nm)
+                okNumLog = false; okCell = false; okStr = false; okLen = false;
+                break
+            end
+            v = Bparts{i}.Perf.(nm);
+
+            okNumLog = okNumLog && (isnumeric(v) || islogical(v));
+            okCell   = okCell   && iscell(v);
+            okStr    = okStr    && isstring(v);
+
+            if (isnumeric(v) || islogical(v) || isstring(v) || iscell(v)) && isvector(v)
+                okLen = okLen && (numel(v) == nPer(i));
+                vals{i} = v(:);
+            else
+                okLen = false;
+            end
+        end
+
+        % Only stitch fields that are per-trial vectors in *every* part.
+        if okLen && (okNumLog || okCell || okStr)
+            try
+                Pout.(nm) = vertcat(vals{:});
             catch
             end
         end
     end
+
+    % keep original per-part Perf for debugging (optional)
+    Pout.part = cell(nParts,1);
+    for i = 1:nParts
+        if isfield(Bparts{i},'Perf'), Pout.part{i} = Bparts{i}.Perf; else, Pout.part{i} = []; end
+    end
+
+    Bout.Perf = Pout;
 end
 
 % stitch idx (shift ONLY numeric trial-index vectors; concatenate others)
@@ -584,7 +672,7 @@ if isfield(Bout,'idx') && isstruct(Bout.idx)
     end
 end
 
-end % <- keep your function end
+end 
 
 function n = get_n_trials_safe(B)
 n = 0;

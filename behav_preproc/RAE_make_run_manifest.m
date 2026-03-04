@@ -21,14 +21,21 @@ names = {D([D.isdir]).name};
 names = names(~ismember(names,{'.','..','LFPData'}));
 
 % keep only folders containing _RA_<Phase>
-phList = {'PreSleep','Conditioning','PostSleep','PostTest'};
+if contains(datapath , 'React_Active')
+    phList = {'PreSleep','Conditioning','PostSleep','PostTest'};
+    project_id = '_RA_';
+elseif contains(datapath, 'React_Passive_ephys')
+    phList = {'PreExp','Exp','PostExp'};
+    project_id = '_';
+end
+
 seg = struct('name',{},'phase',{},'segIdx',{},'tStartName',{},'path',{},'dur_s',{});
 
 for i = 1:numel(names)
     nm = names{i};
     ph = '';
     for p = 1:numel(phList)
-        if ~isempty(regexp(nm, ['_RA_' phList{p} '(\_\d+)?$'], 'once'))
+        if ~isempty(regexp(nm, [project_id phList{p} '(\_\d+)?$'], 'once'))
             ph = phList{p};
             break
         end
@@ -36,7 +43,7 @@ for i = 1:numel(names)
     if isempty(ph), continue; end
 
     % segment index suffix (_1/_2/...) default 0
-    tok = regexp(nm, ['_RA_' ph '_(\d+)$'], 'tokens','once');
+    tok = regexp(nm, [project_id ph '_(\d+)$'], 'tokens','once');
     if isempty(tok), segIdx = 0; else, segIdx = str2double(tok{1}); end
 
     % try parse timestamp in name: yyyy-mm-dd_HH-MM-SS
@@ -115,9 +122,16 @@ function dur_s = oe_segment_duration_seconds(segPath)
 
 % try "fixed" layout first:
 cand = dir(fullfile(segPath,'recording*','continuous','Acquisition_Board*','timestamps.npy'));
-if isempty(cand)
+if isempty(cand) && contains(segPath, 'React_Active')
     % try "unfixed" layout:
     cand = dir(fullfile(segPath,'Record Node*','experiment*','recording*','continuous','Acquisition_Board*','timestamps.npy'));
+end
+
+if isempty(cand) && contains(segPath, 'React_Passive_ephys')
+    cand = dir(fullfile(segPath,'recording*','continuous','Rhythm_FPGA*','timestamps.npy'));
+    if isempty(cand)
+        cand = dir(fullfile(segPath,'Record Node*','experiment*','recording*','continuous','Rhythm_FPGA*','timestamps.npy'));
+    end
 end
 
 Fs = 30000; % fallback
@@ -133,9 +147,16 @@ end
 
 % fallback: use continuous.dat size with channel count if timestamps.npy missing
 cand2 = dir(fullfile(segPath,'recording*','continuous','Acquisition_Board*','continuous.dat'));
-if isempty(cand2)
+if isempty(cand2) && contains(segPath, 'React_Active')
     cand2 = dir(fullfile(segPath,'Record Node*','experiment*','recording*','continuous','Acquisition_Board*','continuous.dat'));
 end
+if isempty(cand2) && contains(segPath, 'React_Passive_ephys')
+    cand2 = dir(fullfile(segPath,'recording*','continuous','Rhythm_FPGA*','continuous.dat'));
+    if isempty(cand2)
+        cand2 = dir(fullfile(segPath,'Record Node*','experiment*','recording*','continuous','Rhythm_FPGA*','continuous.dat'));
+    end
+end
+
 if isempty(cand2)
     error('oe_segment_duration_seconds:NoOE','Cannot find timestamps.npy or continuous.dat in %s', segPath);
 end
@@ -197,6 +218,9 @@ end
 ix = strfind(txt, 'Acquisition_Board');
 if isempty(ix)
     ix = strfind(txt, 'Acquisition Board');
+    if isempty(ix)
+        ix = strfind(txt, 'Rhythm_FPGA-100.0');
+    end
 end
 if isempty(ix)
     ix = 1;

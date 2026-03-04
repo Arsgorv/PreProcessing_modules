@@ -1,62 +1,66 @@
 function [spikes, metadata] = load_wave_clus(directory)
-    % Change to the wave_clus directory
-    cd([directory '/wave_clus'])
+% load_wave_clus
+% Loads wave_clus outputs from:
+%   directory/wave_clus/times_*.mat
+%   directory/wave_clus/<subfolder>/times_*.mat
+%
+% Returns:
+%   spikes   : [maxNspk x Nunits] spike times (ms) with NaN padding
+%   metadata : [Nunits x 2] [channel, cluster]
 
-    % Get a list of all folders in the current directory
-    folders = dir;
-    folders = folders([folders.isdir]); % Only keep directories
-    folders = folders(~ismember({folders.name}, {'.', '..'})); % Exclude '.' and '..'
+wcDir = fullfile(directory);
+if ~exist(wcDir,'dir')
+    error('load_wave_clus:NoWaveClus','Missing folder: %s', wcDir);
+end
 
-    % Initialize variables
-    allSpikes = {}; % Temporary storage for spike times
-    metadata = [];  % To map each column of spikes to channel and cluster
+% gather candidate folders: wcDir itself + its subfolders (1 level)
+folders = dir(wcDir);
+folders = folders([folders.isdir]);
+folders = folders(~ismember({folders.name},{'.','..'}));
 
-    % Loop through each folder
-    for f = 1:length(folders)
-        % Get the full path of the current folder
-        currentFolder = fullfile(folders(f).folder, folders(f).name);
+searchFolders = cell(1, 1+numel(folders));
+searchFolders{1} = wcDir;
+for i = 1:numel(folders)
+    searchFolders{1+i} = fullfile(wcDir, folders(i).name);
+end
 
-        % Find all files starting with "times_"
-        timesFiles = dir(fullfile(currentFolder, 'times_*.mat'));
+allSpikes = {};
+metadata  = [];
 
-        % Loop through each time file
-        for t = 1:length(timesFiles)
-            % Extract the number from the filename (assuming "times_C*.mat")
-            fileName = timesFiles(t).name;
-            match = regexp(fileName, 'times_C(\d+)\.mat', 'tokens');
-            if isempty(match)
-                continue; % Skip if no match is found
-            end
-            ch = str2double(match{1}{1}); % Extract channel number as a numeric value
+for f = 1:numel(searchFolders)
+    cur = searchFolders{f};
+    timesFiles = dir(fullfile(cur, 'times_*.mat'));
+    for t = 1:numel(timesFiles)
+        fileName = timesFiles(t).name;
+        match = regexp(fileName, 'times_C(\d+)\.mat', 'tokens','once');
+        if isempty(match), continue; end
+        ch = str2double(match{1});
 
-            % Load the cluster_class data
-            clusterClassPath = fullfile(timesFiles(t).folder, timesFiles(t).name);
-            disp(['loading ' timesFiles(t).name ' ...'])
-            clusterData = load(clusterClassPath, 'cluster_class');
-            clusterData = clusterData.cluster_class;
+        S = load(fullfile(timesFiles(t).folder, timesFiles(t).name), 'cluster_class');
+        if ~isfield(S,'cluster_class'), continue; end
+        cc = S.cluster_class;
 
-            % Find unique clusters
-            uniqueClusters = unique(clusterData(:, 1));
+        uClu = unique(cc(:,1));
+        uClu(uClu == 0) = []; % noise cluster
 
-            % Remove cluster #0
-            uniqueClusters(uniqueClusters == 0) = [];
-
-            % Store spikes data for each cluster
-            for c = 1:length(uniqueClusters)
-                clusterID = uniqueClusters(c);
-                spikesInCluster = clusterData(clusterData(:, 1) == clusterID, 2); % Extract spike times
-
-                % Append to temporary storage
-                allSpikes{end+1} = spikesInCluster; % Append spike times
-                metadata = [metadata; ch, clusterID]; % Store channel and cluster mapping
-            end
+        for c = 1:numel(uClu)
+            clu = uClu(c);
+            spk = cc(cc(:,1) == clu, 2); % ms (wave_clus convention)
+            allSpikes{end+1} = spk(:); %#ok<AGROW>
+            metadata = [metadata; ch, clu]; %#ok<AGROW>
         end
     end
+end
 
-    % Combine all spike times into a 2D matrix (padded with NaN)
-    maxSpikes = max(cellfun(@length, allSpikes)); % Find the max number of spikes
-    spikes = NaN(maxSpikes, length(allSpikes));  % Initialize with NaN
-    for i = 1:length(allSpikes)
-        spikes(1:length(allSpikes{i}), i) = allSpikes{i}; % Fill each column with spike times
-    end
+if isempty(allSpikes)
+    spikes = NaN(0,0);
+    metadata = zeros(0,2);
+    return
+end
+
+maxSpk = max(cellfun(@numel, allSpikes));
+spikes = NaN(maxSpk, numel(allSpikes));
+for i = 1:numel(allSpikes)
+    spikes(1:numel(allSpikes{i}), i) = allSpikes{i};
+end
 end
