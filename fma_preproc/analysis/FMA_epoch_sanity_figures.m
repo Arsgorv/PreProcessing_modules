@@ -98,7 +98,7 @@ for c = 1:nCols
         spk_ts = Units(repIdx).spike_ts(:);
         trig_ts = E.stim_start_ts(:);
 
-        win_s = [-0.2 2.5];
+        win_s = [-2 5];
         tStart_ts = round(win_s(1)*TsRate);
         tEnd_ts   = round(win_s(2)*TsRate);
         bin_ts    = round(0.02*TsRate);
@@ -146,22 +146,22 @@ for c = 1:nCols
     end
 
     % ---------------- Row 5: "STRF-like": sound_name x time PSTH map ----------------
-    axSTRF = subplot(nRows, nCols, (5-1)*nCols + c); 
-    if hasHF && ~isempty(Units) && isfinite(repIdx) && isstruct(B) && isfield(B,'trial') && isfield(B.trial,'sound_name') && isfield(E,'stim_start_ts')
-        try
-            FMA_soundname_psth_map(axSTRF, Units(repIdx).spike_ts(:), E.stim_start_ts(:), string(B.trial.sound_name(:)));
-            title(axSTRF,'sound x time map');
-            xlabel(axSTRF,'time (ms)');
-            ylabel(axSTRF,'sound');
-        catch
-            axes(axSTRF); axis off; text(0.1,0.5,'sound map failed','FontSize',10);
-        end
-    else
-        axes(axSTRF); axis off; text(0.1,0.5,'no sound_name','FontSize',10);
-    end
+%     axSTRF = subplot(nRows, nCols, (5-1)*nCols + c); 
+%     if hasHF && ~isempty(Units) && isfinite(repIdx) && isstruct(B) && isfield(B,'trial') && isfield(B.trial,'sound_name') && isfield(E,'stim_start_ts')
+%         try
+%             FMA_soundname_psth_map(axSTRF, Units(repIdx).spike_ts(:), E.stim_start_ts(:), string(B.trial.sound_name(:)));
+%             title(axSTRF,'sound x time map');
+%             xlabel(axSTRF,'time (ms)');
+%             ylabel(axSTRF,'sound');
+%         catch
+%             axes(axSTRF); axis off; text(0.1,0.5,'sound map failed','FontSize',10);
+%         end
+%     else
+%         axes(axSTRF); axis off; text(0.1,0.5,'no sound_name','FontSize',10);
+%     end
 
     % ---------------- Row 6: ZETA summary ----------------
-    axZ = subplot(nRows, nCols, (6-1)*nCols + c); %#ok<LAXES>
+    axZ = subplot(nRows, nCols, (6-1)*nCols + c); 
     if hasHF && ~isempty(zetaP)
         zp = zetaP(isfinite(zetaP));
         if isempty(zp)

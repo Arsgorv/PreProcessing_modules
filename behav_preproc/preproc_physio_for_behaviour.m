@@ -285,7 +285,7 @@ y0 = Data(sig);
 t0 = double(t0(:));
 y0 = double(y0(:));
 % y_rs = interp1(t0, y0, time_video_s, 'linear', 'extrap');
-y_rs = interp1(t0, y0, time_video_s, 'linear', Nan); %fixed by AG 15/02/2026
+y_rs = interp1(t0, y0, time_video_s, 'linear', NaN); %fixed by AG 15/02/2026
 
 sig_rs = tsd(time_video_s*1e4, y_rs);
 end

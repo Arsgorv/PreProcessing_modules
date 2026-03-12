@@ -10,7 +10,7 @@ function sync_behaviour_ephys(datapath, runTag)
 %% Settings
 if nargin < 2, runTag = ''; end
 
-Session_params.plt = 1;            % 1 to enable sanity plots
+Session_params.plt = 0;            % 1 to enable sanity plots
 gap_sec_video = 1.0;               % gap between TTL trains to split recordings (seconds)
 max_allowed_mismatch = 200;        % warn if |TTL - frames| larger than this
 

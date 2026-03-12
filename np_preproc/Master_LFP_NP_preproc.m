@@ -240,7 +240,8 @@ for s = 1:numel(sessions)
             if numel(parts{j}) > 1
                 LFP = cat(parts{j}{:});
             end
-
+            temp = double(Data(LFP));
+            LFP = tsd(Range(LFP), temp);
             save(outFile,'LFP','-v7.3');
             disp(['  saved: ' outFile]);
         end
@@ -280,7 +281,7 @@ D = D(~ismember({D.name},{'.','..','LFPData','LFPDataNP'}));
 D = D(ord);
 segs = struct('name',{},'t0_s',{},'t0_ts',{},'dur_s',{},'t1_s',{},'t1_ts',{});
 for i = 1:numel(D)
-    segs(i).name = D(i).name; %#ok<AGROW>
+    segs(i).name = D(i).name; 
 end
 end
 
