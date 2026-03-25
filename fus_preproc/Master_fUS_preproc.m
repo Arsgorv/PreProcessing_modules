@@ -9,6 +9,8 @@ for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}])
     if contains(sessions{sess}, 'Tonotopy')
         make_tsd_raw_tonotopy(sessions{sess});
+    elseif contains(sessions{sess}, 'Arousal')
+            make_tsd_raw_arousal(sessions{sess});
     else
         make_tsd_raw(sessions{sess});
     end
@@ -31,7 +33,8 @@ end
 %% Draw masks
 for sess = 1:numel(sessions)
     disp(['Working on ' sessions{sess}]) 
-    draw_masks(sessions{sess});
+    %draw_masks(sessions{sess}); old GUI
+    
 end
 %% NOT USED YET: Scratching_denoise
 % Scratching_denoise
