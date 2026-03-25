@@ -86,10 +86,18 @@ for sess = 1:numel(sessions)
                 ~isempty(dir(fullfile(datapath,'ephys','*_RA_PostTest*')));
             
             if ~isRAexp
-                disp('  [6] Parsing Baphy file (RA_parse_baphy_active)...')
-                Baphy = RA_parse_baphy_active(datapath, trigOE);
-                disp('  [7] Building epochs (RA_build_epochs_active)...')
-                Epochs = RA_build_epochs_active(datapath, trigOE, Baphy);
+                stimdir = fullfile(datapath,'stim');
+                mAll = dir(fullfile(stimdir,'*.m'));
+                if numel(mAll) <= 1
+                    disp('  [6] Parsing Baphy file (RA_parse_baphy_active)...')
+                    Baphy = RA_parse_baphy_active(datapath, trigOE);
+                    disp('  [7] Building epochs (RA_build_epochs_active)...')
+                    Epochs = RA_build_epochs_active(datapath, trigOE, Baphy);
+                else
+                    disp('  [6] RA training: multiple mfiles detected, parsing/stitching conservatively...')
+                    [Baphy, Epochs, partsTrain] = RA_train_parse_multimfile(datapath, trigOE, 20, 5);
+                    save(fullfile(datapath,'Master_sync_training_parts.mat'), 'partsTrain');
+                end
             else
                 disp('  [6] RA experiment: building run manifest + parsing Conditioning/PostTest separately')
                 
@@ -373,46 +381,168 @@ for ii = 1:numel(fns)
 end
 end
 
+
+function [Btrain, Etrain, parts] = RA_train_parse_multimfile(datapath, trigOE, blockGap_s, pad_s)
+% Conservative training parser for sessions with multiple Baphy .m files.
+% Updated v2:
+%   - do not split training TTLs into gap-defined blocks
+%   - consume the pruned trial TTL sequence in session order
+%   - assign TTLs to each m-file sequentially using expected trial counts
+
+Btrain = [];
+Etrain = [];
+parts = struct('mfile',{},'t0_s',{},'t1_s',{},'B',{},'E',{}, ...
+    'n_trials_expected',{},'n_ttl_used',{});
+
+stimdir = fullfile(datapath,'stim');
+mfiles = RA_list_training_mfiles(stimdir);
+if isempty(mfiles)
+    warning('No training mfiles found in %s', stimdir);
+    return
+end
+
+t = get_baphy_ttl_seconds(trigOE);
+if isempty(t)
+    warning('No Baphy TTLs found for multi-mfile training parse.');
+    return
+end
+
+t = RA_prune_close_pulses(t, 0.5);
+nTTL = numel(t);
+nMf = numel(mfiles);
+
+info = cell(nMf,1);
+nExp = nan(nMf,1);
+for k = 1:nMf
+    info{k} = RA_get_mfile_info(mfiles{k});
+    nExp(k) = info{k}.n_trials;
+end
+
+if all(isfinite(nExp))
+    fprintf('  [RA training] multiple mfiles: expected total=%d, TTL=%d\n', sum(nExp), nTTL);
+else
+    fprintf('  [RA training] multiple mfiles: TTL=%d, some expected counts unavailable\n', nTTL);
+end
+
+Bparts = cell(nMf,1);
+Eparts = cell(nMf,1);
+cursor = 1;
+
+for k = 1:nMf
+    mf = mfiles{k};
+    infoMf = info{k};
+
+    if cursor > nTTL
+        warning('[RA training] No TTLs left for mfile %d/%d: %s', k, nMf, mf);
+        break
+    end
+
+    if isfinite(infoMf.n_trials) && infoMf.n_trials > 0
+        stopIdx = min(nTTL, cursor + infoMf.n_trials - 1);
+    else
+        if k < nMf
+            nLeftMf = nMf - k + 1;
+            approxN = floor((nTTL - cursor + 1) / nLeftMf);
+            stopIdx = min(nTTL, cursor + max(1, approxN) - 1);
+        else
+            stopIdx = nTTL;
+        end
+    end
+
+    selT = t(cursor:stopIdx);
+
+    if isempty(selT)
+        warning('[RA training] Empty TTL assignment for mfile %d/%d: %s', k, nMf, mf);
+        break
+    end
+
+    if isfinite(infoMf.n_trials) && numel(selT) < infoMf.n_trials
+        warning('[RA training] mfile %d/%d expected %d trials but only %d TTLs remain.', ...
+            k, nMf, infoMf.n_trials, numel(selT));
+    end
+
+    t0_s = selT(1) - pad_s;
+    t1_s = selT(end) + pad_s;
+
+    trK = subset_trigOE_to_window(trigOE, round(t0_s*1e4), round(t1_s*1e4));
+    trK = RA_overwrite_baphy_ttls(trK, selT);
+
+    outTag = sprintf('train_%d', k);
+    Bk = RA_parse_baphy_active(datapath, trK, 'MFile', mf, 'OutTag', outTag);
+    Ek = RA_build_epochs_active(datapath, trK, Bk);
+
+    parts(k).mfile = mf;
+    parts(k).t0_s = t0_s;
+    parts(k).t1_s = t1_s;
+    parts(k).B = Bk;
+    parts(k).E = Ek;
+    parts(k).n_trials_expected = infoMf.n_trials;
+    parts(k).n_ttl_used = numel(selT);
+
+    Bparts{k} = Bk;
+    Eparts{k} = Ek;
+
+    cursor = stopIdx + 1;
+end
+
+Bparts = Bparts(~cellfun(@isempty, Bparts));
+Eparts = Eparts(~cellfun(@isempty, Eparts));
+parts = parts(~cellfun(@isempty, {parts.mfile}));
+
+if isempty(Bparts)
+    warning('Could not parse any training multi-mfile parts.');
+    return
+end
+
+if cursor <= nTTL
+    warning('[RA training] %d trailing Baphy TTLs were left unused after sequential mfile assignment.', nTTL - cursor + 1);
+end
+
+Btrain = RAExp_stitch_baphy(Bparts);
+Etrain = RAExp_stitch_epochs(Eparts);
+end
+
 function [Bphase, Ephase, trigPhase, parts] = RAExp_parse_phase(datapath, trigOE, RUN, phaseName, dlcSubdir, blockGap_s, pad_s)
 % Parse a head-fixed phase that may have multiple Baphy mfiles and TTL blocks.
-% Returns stitched Bphase/Ephase and also per-part structs.
+% Conservative updates:
+%   - restrict to manifest phase window
+%   - prune unrealistically close duplicate TTL pulses
+%   - if a block has too many pulses, select the subset closest to the mfile
 
 Bphase = [];
 Ephase = [];
 trigPhase = [];
-parts = struct('mfile',{},'t0_s',{},'t1_s',{},'B',{},'E',{});
+parts = struct('mfile',{},'t0_s',{},'t1_s',{},'B',{},'E',{}, ...
+    'n_trials_expected',{},'n_ttl_used',{});
 
 TsRate = 1e4;
 stimdir = fullfile(datapath,'stim');
 
-% list and sort phase mfiles
 mfiles = RAExp_list_phase_mfiles(stimdir, phaseName);
 if isempty(mfiles)
     warning('[%s] No mfiles found in stim/', phaseName);
     return
 end
 
-% run window from manifest
 t0_run = RUN.run.(phaseName).t0_ts;
 t1_run = RUN.run.(phaseName).t1_ts;
 
-% restrict triggers to run window
 trigRun = subset_trigOE_to_window(trigOE, t0_run, t1_run);
 trigPhase = trigRun;
 
-% get baphy TTL times within run
-if ~isfield(trigRun,'baphy') || ~isfield(trigRun.baphy,'t_raw_s') || isempty(trigRun.baphy.t_raw_s)
+t = get_baphy_ttl_seconds(trigRun);
+if isempty(t)
     warning('[%s] No trigRun.baphy.t_raw_s', phaseName);
     return
 end
-t = trigRun.baphy.t_raw_s(:);
 
-% split TTL pulses into blocks by restart gaps
+t = RA_prune_close_pulses(t, 0.5);
+
 blk = RAExp_split_blocks(t, blockGap_s);
 nBlk = size(blk,1);
 nMf  = numel(mfiles);
-
 nUse = min(nBlk, nMf);
+
 if nUse < nMf || nUse < nBlk
     warning('[%s] blocks=%d, mfiles=%d. Using %d pairs in order.', phaseName, nBlk, nMf, nUse);
 end
@@ -421,44 +551,186 @@ Bparts = cell(nUse,1);
 Eparts = cell(nUse,1);
 
 for k = 1:nUse
-    i0 = blk(k,1); i1 = blk(k,2);
-    t0_s = t(i0) - pad_s;
-    t1_s = t(i1) + pad_s;
-    
-    trK = subset_trigOE_to_window(trigOE, round(t0_s*TsRate), round(t1_s*TsRate));
-    
-    % (important) overwrite baphy n_trials to match this block
-    if isfield(trK,'baphy') && isfield(trK.baphy,'t_raw_s') && ~isempty(trK.baphy.t_raw_s)
-        trK.baphy.n_trials = numel(trK.baphy.t_raw_s);
-    end
-    
     mf = mfiles{k};
-    
-    % You already added these options to RA_parse_baphy_active:
-    % 'MFile', 'DLCSubdir', 'OutTag'
+    infoMf = RA_get_mfile_info(mf);
+
+    blockT = t(blk(k,1):blk(k,2));
+    selT = RA_select_block_subset(blockT, infoMf.n_trials, infoMf.trial_span_s);
+
+    t0_s = selT(1) - pad_s;
+    t1_s = selT(end) + pad_s;
+
+    trK = subset_trigOE_to_window(trigOE, round(t0_s*TsRate), round(t1_s*TsRate));
+    trK = RA_overwrite_baphy_ttls(trK, selT);
+
     outTag = phaseName;
     if k > 1
         outTag = sprintf('%s_%d', phaseName, k-1);
     end
-    
+
     Bk = RA_parse_baphy_active(datapath, trK, ...
         'MFile', mf, 'DLCSubdir', dlcSubdir, 'OutTag', outTag);
-    
+
     Ek = RA_build_epochs_active(datapath, trK, Bk, dlcSubdir);
-    
+
     parts(k).mfile = mf;
     parts(k).t0_s  = t0_s;
     parts(k).t1_s  = t1_s;
     parts(k).B     = Bk;
     parts(k).E     = Ek;
-    
+    parts(k).n_trials_expected = infoMf.n_trials;
+    parts(k).n_ttl_used = numel(selT);
+
     Bparts{k} = Bk;
     Eparts{k} = Ek;
+end
+
+if isempty(Bparts)
+    warning('[%s] No stitched parts were created.', phaseName);
+    return
 end
 
 Bphase = RAExp_stitch_baphy(Bparts);
 Ephase = RAExp_stitch_epochs(Eparts);
 
+end
+
+
+function mfiles = RA_list_training_mfiles(stimdir)
+% Sort training mfiles as ..._1.m, ..._2.m ... ; fallback to name order.
+d = dir(fullfile(stimdir, '*.m'));
+if isempty(d), mfiles = {}; return; end
+
+k = nan(numel(d),1);
+for i = 1:numel(d)
+    tok = regexp(d(i).name, '_(\d+)\.m$', 'tokens', 'once');
+    if ~isempty(tok)
+        k(i) = str2double(tok{1});
+    end
+end
+
+if all(isnan(k))
+    [~, ord] = sort(lower({d.name}));
+else
+    k(isnan(k)) = 0;
+    [~, ord] = sort(k);
+end
+d = d(ord);
+
+mfiles = cell(numel(d),1);
+for i = 1:numel(d)
+    mfiles{i} = fullfile(stimdir, d(i).name);
+end
+end
+
+function t = get_baphy_ttl_seconds(trigS)
+t = [];
+if isfield(trigS,'baphy') && isstruct(trigS.baphy)
+    if isfield(trigS.baphy,'t_raw_s') && ~isempty(trigS.baphy.t_raw_s)
+        t = trigS.baphy.t_raw_s(:);
+    elseif isfield(trigS.baphy,'trial_start_ts') && ~isempty(trigS.baphy.trial_start_ts)
+        t = trigS.baphy.trial_start_ts(:) ./ 1e4;
+    elseif isfield(trigS.baphy,'t_raw_ts') && ~isempty(trigS.baphy.t_raw_ts)
+        t = trigS.baphy.t_raw_ts(:) ./ 1e4;
+    end
+end
+end
+
+function t2 = RA_prune_close_pulses(t, minISI_s)
+t2 = t(:);
+if numel(t2) < 2
+    return
+end
+keep = [true; diff(t2) > minISI_s];
+t2 = t2(keep);
+end
+
+function infoMf = RA_get_mfile_info(mfile)
+infoMf = struct('n_trials', NaN, 'trial_span_s', NaN);
+try
+    clear globalparams exptparams exptevents
+    run(mfile);
+    if exist('exptevents','var')
+        trAll = [exptevents.Trial];
+        trAll = trAll(trAll > 0 & isfinite(trAll));
+        if ~isempty(trAll)
+            infoMf.n_trials = double(max(trAll));
+        end
+
+        if isfinite(infoMf.n_trials) && infoMf.n_trials > 0
+            trId = [exptevents.Trial];
+            stopMax = nan(infoMf.n_trials,1);
+            for tt = 1:infoMf.n_trials
+                kk = find(trId == tt);
+                if isempty(kk), continue; end
+                st = [exptevents(kk).StopTime];
+                if ~isempty(st)
+                    stopMax(tt) = max(st);
+                end
+            end
+            if any(isfinite(stopMax))
+                infoMf.trial_span_s = sum(stopMax(isfinite(stopMax)));
+            end
+        end
+    end
+catch
+end
+end
+
+function selT = RA_select_block_subset(blockT, nExpected, trialSpan_s)
+selT = blockT(:);
+if isempty(selT)
+    return
+end
+if ~isfinite(nExpected) || nExpected <= 0
+    return
+end
+if numel(selT) <= nExpected
+    selT = selT(1:min(numel(selT), nExpected));
+    return
+end
+
+nWin = numel(selT) - nExpected + 1;
+bestCost = inf;
+bestIdx = 1;
+
+for i = 1:nWin
+    sub = selT(i:i+nExpected-1);
+    cost = 0;
+
+    dt = diff(sub);
+    if ~isempty(dt)
+        meddt = median(dt);
+        if isfinite(meddt) && meddt > 0
+            cost = cost + sum(dt < 0.25 * meddt);
+        end
+    end
+
+    if isfinite(trialSpan_s) && trialSpan_s > 0
+        spanErr = abs((sub(end) - sub(1)) - trialSpan_s) / trialSpan_s;
+        cost = cost + spanErr;
+    else
+        cost = cost + i / max(1, nWin);
+    end
+
+    if cost < bestCost
+        bestCost = cost;
+        bestIdx = i;
+    end
+end
+
+selT = selT(bestIdx:bestIdx+nExpected-1);
+end
+
+function trK = RA_overwrite_baphy_ttls(trK, selT_s)
+selT_s = selT_s(:);
+if ~isfield(trK,'baphy') || ~isstruct(trK.baphy)
+    trK.baphy = struct();
+end
+trK.baphy.t_raw_s = selT_s;
+trK.baphy.t_raw_ts = round(selT_s * 1e4);
+trK.baphy.trial_start_ts = trK.baphy.t_raw_ts;
+trK.baphy.n_trials = numel(selT_s);
 end
 
 function mfiles = RAExp_list_phase_mfiles(stimdir, phaseName)

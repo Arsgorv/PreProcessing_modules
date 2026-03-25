@@ -93,6 +93,16 @@ for k = 1:numel(ttl_names)
 
     t_ts = Range(LFP);      % ts units (1e-4 s)
     v    = Data(LFP);
+    t_plot_s = double(t_ts(:)) / 1e4;
+    v_plot = double(v(:));
+    if numel(t_plot_s) ~= numel(v_plot)
+        nMin = min(numel(t_plot_s), numel(v_plot));
+        warning('[extract_triggers_oe] t/v length mismatch on channel %d. Cropping to %d samples for plotting/detection.', ch, nMin);
+        t_ts = t_ts(1:nMin);
+        v = v(1:nMin);
+        t_plot_s = t_plot_s(1:nMin);
+        v_plot = v_plot(1:nMin);
+    end
 
     if isempty(time_lfp_ts)
         % define common time base from the first channel we load
@@ -166,9 +176,9 @@ for k = 1:numel(ttl_names)
     if cfg.plt
         figure('Name', ['TTL ' ttl_name],'Color','w');
         subplot(2,1,1);
-        plot(time_lfp_s, v);
+        plot(t_plot_s, v_plot);
         hold on;
-        plot(t_peak_s, max(v)*ones(size(t_peak_s))*1.02,'.r');
+        plot(t_peak_s, max(v_plot)*ones(size(t_peak_s))*1.02,'.r');
         xlabel('Time (s)');
         ylabel('LFP');
         title(sprintf('%s TTL channel %d', ttl_name, ch));

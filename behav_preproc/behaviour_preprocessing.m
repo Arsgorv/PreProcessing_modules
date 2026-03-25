@@ -39,13 +39,16 @@ filename{1} = dlc_file{1}.name;
 filename{2} = dlc_file{2}.name;
 disp(['DLC data face: ' filename{1} ' ; DLC data eye:' filename{2}])
 
-dataStruct{1} = importdata(fullfile(baseVid, filename{1}));
-dataStruct{2} = importdata(fullfile(baseVid, filename{2}));
+timeSource = {'csv_column','csv_column'};
 for k = 1:2
-    if isstruct(dataStruct{k})
-        data{k} = dataStruct{k}.data;
+    if k == 1
+        camRole = 'face';
     else
-        data{k} = dataStruct{k};
+        camRole = 'eye';
+    end
+    [data{k}, timeSource{k}] = load_synced_csv_with_exact_time(baseVid, filename{k}, camRole);
+    if isempty(data{k}) || size(data{k},1) < 2
+        error('Synchronized DLC file is empty or too short for %s in %s', camRole, baseVid);
     end
 end
 
@@ -54,9 +57,9 @@ for id = 1:2
     time_vals = data{id}(:,1);
     if any(diff(time_vals) < 0)
         warning('Time stamps in file %d are not monotonic. Sorting...', id);
-        [~, idx] = sort(time_vals);
-        data{id} = data{id}(idx, :); % reorder all columns
-        csvwrite(fullfile(datapath, 'video', filename{id}), data{id});
+        [~, idxSort] = sort(time_vals);
+        data{id} = data{id}(idxSort, :);
+        csvwrite(fullfile(baseVid, filename{id}), data{id});
     end
 end
 
@@ -305,10 +308,14 @@ savePath = fullfile(datapath,'video');
 if ~isempty(runTag), savePath = fullfile(savePath, runTag); end
 if ~exist(savePath,'dir'), mkdir(savePath); end
 
+time_face_exact = time_face;
+time_eye_exact = time_eye;
+time_face_source = timeSource{1};
+time_eye_source = timeSource{2};
 
 if ~exist(fullfile(savePath, 'DLC_data.mat'), 'file')
     save(fullfile(savePath, 'DLC_data.mat'), ...
-        'Session_params','time_face','time_eye', ...
+        'Session_params','time_face','time_eye','time_face_exact','time_eye_exact','time_face_source','time_eye_source', ...
         'pupil_area_004','eye_area_004','nostril_area','nose_area', ...
         'pupil_area_007','eye_area_007', ...
         'pupil_center_004','pupil_center_007','nostril_center','nose_center','cheek_center','ear_center','jaw_center','tongue_center','spout_center',...
@@ -316,7 +323,7 @@ if ~exist(fullfile(savePath, 'DLC_data.mat'), 'file')
         'spout_likelihood');
 else
     save(fullfile(savePath, 'DLC_data.mat'), ...
-        'Session_params','time_face','time_eye', ...
+        'Session_params','time_face','time_eye','time_face_exact','time_eye_exact','time_face_source','time_eye_source', ...
         'pupil_area_004','eye_area_004','nostril_area','nose_area', ...
         'pupil_area_007','eye_area_007', ...
         'pupil_center_004','pupil_center_007','nostril_center','nose_center','cheek_center','ear_center','jaw_center','tongue_center','spout_center',...
@@ -768,4 +775,51 @@ end
 % saveas(f5, fullfile(figFolder, [Session_params.animal_name 'nostril_all_' Session_params.session_selection]), 'svg')
 % saveas(f5, fullfile(figFolder, [Session_params.animal_name 'nostril_all_' Session_params.session_selection]), 'png')
 
+end
+
+function [data, timeSource] = load_synced_csv_with_exact_time(baseVid, filename, camRole)
+timeSource = 'csv_column';
+
+dataStruct = importdata(fullfile(baseVid, filename));
+if isstruct(dataStruct)
+    data = dataStruct.data;
+else
+    data = dataStruct;
+end
+
+exactTime = [];
+cand = { ...
+    fullfile(baseVid, ['synchronized_DLC_data_' camRole '_times.mat']), ...
+    fullfile(baseVid, ['synchronized_DLC_times_' camRole '.mat'])};
+
+for i = 1:numel(cand)
+    if ~exist(cand{i}, 'file')
+        continue
+    end
+    try
+        S = load(cand{i});
+        if isfield(S, 'allTime') && ~isempty(S.allTime)
+            exactTime = double(S.allTime(:));
+            timeSource = 'sidecar_exact';
+            break
+        elseif isfield(S, 'sync_time_ts') && ~isempty(S.sync_time_ts)
+            exactTime = double(S.sync_time_ts(:));
+            timeSource = 'sidecar_exact';
+            break
+        end
+    catch ME
+        warning('Could not load exact synced time sidecar %s (%s). Falling back to csv column.', ...
+            cand{i}, ME.message);
+    end
+end
+
+if ~isempty(exactTime)
+    if numel(exactTime) == size(data,1)
+        data(:,1) = exactTime;
+    else
+        warning('Exact synced time length mismatch for %s: sidecar=%d csv=%d. Using csv column.', ...
+            filename, numel(exactTime), size(data,1));
+        timeSource = 'csv_column';
+    end
+end
 end
