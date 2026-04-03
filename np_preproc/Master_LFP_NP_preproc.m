@@ -1,6 +1,6 @@
 function Master_LFP_NP_preproc(sessions, opts)
 % Master_LFP_NP_preproc
-% Export Neuropixels LFP (ProbeA-LFP) onto the MASTER (Acquisition Board) stitched timeline.
+% Export Neuropixels LFP (Probe*-LFP) onto the MASTER (Acquisition Board) stitched timeline.
 %
 % Outputs:
 %   per_channel:
@@ -9,7 +9,7 @@ function Master_LFP_NP_preproc(sessions, opts)
 %     <datapath>/ephys/LFPDataNP/LFPmat_<seg>.mat (variables Y int16, t0_ts, dt_ts, nOut, chUse, Fs_ds)
 %
 % Required:
-%   opts.np_channels : 1-based channels within ProbeA-LFP stream
+%   opts.np_channels : 1-based channels within Probe*-LFP stream
 %
 % Optional:
 %   opts.lfp_fs      : target Fs (default 1250)
@@ -90,7 +90,11 @@ for s = 1:numel(sessions)
             segFolder = fullfile(datapath,'ephys', segs(i).name);
             streamRoot = oe_find_stream(segFolder, 'ProbeA-LFP');
             if isempty(streamRoot)
-                warning('  no ProbeA-LFP in %s', segs(i).name);
+                warning('  no ProbeA-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
+            end
+            streamRoot = oe_find_stream(segFolder, 'ProbeB-LFP');
+            if isempty(streamRoot)
+                warning('  no ProbeB-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
                 continue
             end
 
@@ -113,7 +117,7 @@ for s = 1:numel(sessions)
             outMat = fullfile(outDir, ['LFPmat_' segs(i).name '.mat']);
             if exist(outMat,'file')==2 && ~opts.force
                 disp(['  skip existing mat: ' outMat]);
-                matFiles{end+1} = outMat; %#ok<AGROW>
+                matFiles{end+1} = outMat; 
                 continue
             end
 
@@ -128,7 +132,7 @@ for s = 1:numel(sessions)
             save(outMat, 't0_ts','dt_ts','nOut','chUse','Fs_ds','-append');
 
             Fs_ds_bySeg(i) = Fs_ds;
-            matFiles{end+1} = outMat; %#ok<AGROW>
+            matFiles{end+1} = outMat; 
             disp(['  saved mat: ' outMat]);
         end
 
@@ -146,7 +150,11 @@ for s = 1:numel(sessions)
             segFolder = fullfile(datapath,'ephys', segs(i).name);
             streamRoot = oe_find_stream(segFolder, 'ProbeA-LFP');
             if isempty(streamRoot)
-                warning('  no ProbeA-LFP in %s', segs(i).name);
+                warning('  no ProbeA-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
+            end
+            streamRoot = oe_find_stream(segFolder, 'ProbeB-LFP');
+            if isempty(streamRoot)
+                warning('  no ProbeB-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
                 continue
             end
 
@@ -301,7 +309,7 @@ end
 end
 
 function [Fs, nCh] = oe_read_stream_info(streamRoot, FsFallback, nChFallback)
-% Robust to stream folders containing dots: "OneBox-102.ProbeA-LFP"
+% Robust to stream folders containing dots: "OneBox-102.Probe*-LFP"
 Fs = FsFallback;
 nCh = nChFallback;
 

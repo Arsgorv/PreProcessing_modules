@@ -59,7 +59,6 @@ switch animal_name
         cfg.face_ch  = [];
         cfg.eye_ch   = [];
         cfg.respi    = [];
-        cfg.heart    = [];  
         cfg.OneBox   = [];
         cfg.baphy_train_gap_s = 0.10;
     case {'Tvorozhok'} % training
@@ -92,28 +91,33 @@ switch animal_name
         cfg.face_ch  = 22;
         cfg.eye_ch   = [];
         cfg.respi    = [];
-        cfg.heart    = 26;   
-        cfg.OneBox   = [];        
+        cfg.heart    = 26;
+        cfg.OneBox   = [];
         cfg.baphy_train_gap_s = 0.10;
     case {'Mochi'} % training
-        cfg.fus_ch   = [];
-        cfg.emg      = 5;
-        cfg.ob       = 15;
-        cfg.respi    = 19;
-        cfg.heart    = 20;
-        cfg.OneBox   = [];
-        cfg.baphy_ch = 22;
-        cfg.face_ch  = 23;
-        cfg.eye_ch   = 24;
-        cfg.baphy_train_gap_s = 0.10;
-%     case {'Mochi'} % React Active
-%         cfg.fus_ch   = [];
-%         cfg.baphy_ch = NaN;
-%         cfg.face_ch  = NaN;
-%         cfg.eye_ch   = NaN;
-%         cfg.respi    = NaN;
-%         cfg.heart    = NaN;       
-%         cfg.OneBox   = NaN;         
+        if contains(datapath, 'training')        
+            cfg.fus_ch   = [];
+            cfg.emg      = 5;
+            cfg.ob       = 15;
+            cfg.respi    = 19;
+            cfg.heart    = 20;
+            cfg.OneBox   = [];
+            cfg.baphy_ch = 22;
+            cfg.face_ch  = 23;
+            cfg.eye_ch   = 24;
+            cfg.baphy_train_gap_s = 0.10;
+        elseif contains(datapath, 'experiment')
+            cfg.fus_ch   = [];
+            cfg.emg      = 34;
+            cfg.ob       = 46;
+            cfg.respi    = 54;
+            cfg.heart    = 55;
+            cfg.OneBox   = 56;
+            cfg.baphy_ch = 57;
+            cfg.face_ch  = 58;
+            cfg.eye_ch   = 59;
+            cfg.baphy_train_gap_s = 0.10;
+        end
     case {'Brayon'}
         cfg.fus_ch   = [];
         cfg.respi    = 19;
@@ -129,8 +133,12 @@ switch animal_name
         cfg.face_ch  = 57;
         cfg.eye_ch   = [];
         cfg.respi    = [];
+<<<<<<< Updated upstream
         cfg.heart    = 61;  
         cfg.OneBox   = []; 
+=======
+        cfg.heart    = 61;
+>>>>>>> Stashed changes
         cfg.baphy_train_gap_s = 0.10;
     case {'Kiri'}
         cfg.fus_ch   = NaN;
@@ -138,7 +146,6 @@ switch animal_name
         cfg.face_ch  = NaN;
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
-        cfg.heart    = NaN;        
         cfg.baphy_train_gap_s = 0.10;
     otherwise
         cfg.fus_ch   = NaN;
@@ -146,7 +153,6 @@ switch animal_name
         cfg.face_ch  = NaN;
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
-        cfg.heart    = NaN;        
         cfg.baphy_train_gap_s = NaN;
 end
 
@@ -205,8 +211,6 @@ end
 
 % out_file = fullfile(datapath, 'channel_cfg.mat');
 % save(out_file, 'cfg');
-% 
 % disp(['Saved cfg to: ' out_file])
 % disp('----------------------------------')
-% 
 end
