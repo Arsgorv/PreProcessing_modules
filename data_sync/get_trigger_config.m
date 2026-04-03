@@ -134,12 +134,8 @@ switch animal_name
         cfg.face_ch  = 57;
         cfg.eye_ch   = [];
         cfg.respi    = [];
-<<<<<<< Updated upstream
         cfg.heart    = 61;  
         cfg.OneBox   = []; 
-=======
-        cfg.heart    = 61;
->>>>>>> Stashed changes
         cfg.baphy_train_gap_s = 0.10;
     case {'Kiri'}
         cfg.fus_ch   = NaN;
@@ -212,10 +208,10 @@ if isnan(cfg.OneBox)
     end
 end
 
-% out_file = fullfile(datapath, 'channel_cfg.mat');
-% save(out_file, 'cfg');
-%
-% disp(['Saved cfg to: ' out_file])
-% disp('----------------------------------')
-%
+out_file = fullfile(datapath, 'channel_cfg.mat');
+save(out_file, 'cfg');
+
+disp(['Saved cfg to: ' out_file])
+disp('----------------------------------')
+
 end
