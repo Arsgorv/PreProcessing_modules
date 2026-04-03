@@ -80,40 +80,23 @@ if contains(datapath, 'Kosichka') || contains(datapath, 'Ficello')
     tail = regexp(datapath, '[^\\\/]+$', 'match', 'once');
     
     for s = 1:Nslices
-        % raw_slice: x � y � time � phase(3)
+        % raw_slice: x x y x time x phase(3)
         raw_slice = nan(Nx, Ny, maxT, nFiles, 'single');
         raw_data = [];
         for count = 1:nFiles
             padLength = maxT - epochDuration(count);
-            % select current slice: Nx � Ny � T
+            % select current slice: Nx x Ny x T
             tmp = data{count}(:,:,:,s);
-            
-            % if padLength > 0
-            %     tmp = cat(3, tmp(:,:,1:epochDuration(count)), ...
-            %         nan(Nx, Ny, padLength, 'like', tmp));
-            % else
-            %     tmp = tmp(:,:,1:maxT);
-            % end
             tmp = tmp(:,:,1:epochDuration(count));
-
-            %raw_slice(:,:,:,count) = tmp;
-
             raw_data = cat(3, raw_data, tmp);
         end
                 
-        % concatenate phases along time: Arousal1 - ArousalN according to file_order
-        % raw_data = [];
-        % 
-        % for iFile = 1:nFiles
-        %     raw_data = cat(3, raw_data, raw_slice(:,:,:,iFile));
-        % end   % Nx � Ny � (3*maxT)
-        
         Nt_all = size(raw_data,3);
         Fs = 2.5; % frames per second
         tvec = linspace(0, (Nt_all/Fs)*1e4, Nt_all)';
         
-        M_perm = permute(raw_data, [3 1 2]);      % T � X � Y
-        data2D = reshape(M_perm, Nt_all, Nx*Ny);    % T � (X*Y)
+        M_perm = permute(raw_data, [3 1 2]);      % T x X x Y
+        data2D = reshape(M_perm, Nt_all, Nx*Ny);    % T x (X*Y)
         
         tsd_raw.data = tsd(tvec, data2D);
         tsd_raw.Nx = Nx;

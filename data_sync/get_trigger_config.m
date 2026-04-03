@@ -129,7 +129,8 @@ switch animal_name
         cfg.face_ch  = 57;
         cfg.eye_ch   = [];
         cfg.respi    = [];
-        cfg.heart    = 61;        
+        cfg.heart    = 61;  
+        cfg.OneBox   = []; 
         cfg.baphy_train_gap_s = 0.10;
     case {'Kiri'}
         cfg.fus_ch   = NaN;

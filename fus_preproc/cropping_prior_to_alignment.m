@@ -36,8 +36,19 @@ for s = 1:length(sliceLetters)
     bottom_adjust = 0;
 
     while bottom_adjust <= 0
-        figure;
-        imagesc(temp_data(:,:,1));
+        figure;        
+        frame = temp_data(:,:,1);
+        frame_double = double(frame);
+
+        % Optional: add small constant to avoid log(0)
+        frame_log = log(frame_double + 1);
+
+        % Normalize back to 0-255 for display or saving as uint8
+        frame_log = frame_log - min(frame_log(:));
+        frame_log = frame_log / max(frame_log(:));
+        frame_log = uint8(frame_log * 255);
+
+        imagesc(frame_log);
         axis image; colormap hot;
         title('Draw ROI (imrect), double-click to confirm');
 

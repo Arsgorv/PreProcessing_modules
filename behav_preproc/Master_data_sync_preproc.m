@@ -185,10 +185,14 @@ for sess = 1:numel(sessions)
         % 6b) Regularise / check TTLs
         if has_OE && ~isempty(trigOE)
             disp('  [6b] Regularising OE TTLs (regularize_all_ttl)...')
-            try
-                trigOE = regularize_all_ttl(trigOE, Baphy, datapath);
-            catch MEreg
-                warning('regularize_all_ttl crashed: %s', MEreg.message);
+            if strcmp(project,'Arousal')
+                trigOE = regularize_all_ttl_Arousal(trigOE, datapath);
+            else
+                try
+                    trigOE = regularize_all_ttl(trigOE, Baphy, datapath);
+                catch MEreg
+                    warning('regularize_all_ttl crashed: %s', MEreg.message);
+                end
             end
         elseif ~has_OE && ~isempty(trig_csv)
             disp('  [6b] Regularising csv TTLs (regularize_all_ttl_csv)...')
@@ -222,6 +226,13 @@ for sess = 1:numel(sessions)
                 Epochs = RP_build_epochs_tonotopy(datapath, trigOE, Baphy);
             else
                 disp(' No tonotopy yet for .csv triggers')
+            end
+        elseif strcmp(project, 'Arousal')
+            if has_OE && ~isempty(trigOE)
+                disp('  [7] Building epochs (RP_build_epochs_Arousal)...')
+                Epochs = RP_build_epochs_arousal(datapath, trigOE);
+            else
+                disp(' No Arousal sync yet for .csv triggers')
             end
             
         else
@@ -268,22 +279,28 @@ for sess = 1:numel(sessions)
             disp('  [4e] check_trial_counts.m not found, skipping.');
         end
         
-        % Small textual summary
-        n_csv_baphy = 0;
-        if ~isempty(trig_csv) && isfield(trig_csv,'baphy_time_s')
-            n_csv_baphy = numel(trig_csv.baphy_time_s);
-        end
-        n_oe_baphy = 0;
-        if ~isempty(trigOE) && isfield(trigOE,'baphy') && isfield(trigOE.baphy,'t_raw_s')
-            n_oe_baphy = numel(trigOE.baphy.t_raw_s);
-        end
-        fprintf('  Summary: Baphy-trials=%d | csv-Baphy-TTL=%d | OE-Baphy-TTL=%d\n', ...
-            Baphy.n_trials, n_csv_baphy, n_oe_baphy);
+        if ~strcmp(project, 'Arousal')
+            % Small textual summary baphy
+            n_csv_baphy = 0;
+            if ~isempty(trig_csv) && isfield(trig_csv,'baphy_time_s')
+                n_csv_baphy = numel(trig_csv.baphy_time_s);
+            end
+            n_oe_baphy = 0;
+            if ~isempty(trigOE) && isfield(trigOE,'baphy') && isfield(trigOE.baphy,'t_raw_s')
+                n_oe_baphy = numel(trigOE.baphy.t_raw_s);
+            end
+            fprintf('  Summary: Baphy-trials=%d | csv-Baphy-TTL=%d | OE-Baphy-TTL=%d\n', ...
+                Baphy.n_trials, n_csv_baphy, n_oe_baphy);
+        end 
         
         
         % 9) Save everything in one place
         out_file = fullfile(datapath, 'Master_sync.mat');
-        save(out_file, 'trig_csv', 'trigOE', 'Baphy', 'Epochs');
+        if strcmp(project, 'Arousal')
+            save(out_file, 'trig_csv', 'trigOE', 'Epochs');
+        else
+            save(out_file, 'trig_csv', 'trigOE', 'Baphy', 'Epochs');
+        end
         disp(['  Saved master sync file: ' out_file])
         
     catch ME

@@ -45,7 +45,7 @@ if ~isfield(cfg,'plt'), cfg.plt = 0; end
 trigOE = struct;
 
 % figure out animal name just for logging
-animals = {'Edel','Chabichou','Kosichka','Tvorozhok','Shropshire','Brynza','Labneh','Mochi','Brayon'};
+animals = {'Edel','Chabichou','Kosichka','Tvorozhok','Shropshire','Brynza','Labneh','Mochi','Brayon', 'Ficello'};
 Session_params.animal = 'unknown';
 for i = 1:numel(animals)
     if contains(datapath, animals{i})
