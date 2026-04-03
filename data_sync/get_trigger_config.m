@@ -59,6 +59,7 @@ switch animal_name
         cfg.face_ch  = [];
         cfg.eye_ch   = [];
         cfg.respi    = [];
+        cfg.heart    = [];
         cfg.OneBox   = [];
         cfg.baphy_train_gap_s = 0.10;
     case {'Tvorozhok'} % training
@@ -146,6 +147,7 @@ switch animal_name
         cfg.face_ch  = NaN;
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
+        cfg.heart    = NaN;
         cfg.baphy_train_gap_s = 0.10;
     otherwise
         cfg.fus_ch   = NaN;
@@ -153,6 +155,7 @@ switch animal_name
         cfg.face_ch  = NaN;
         cfg.eye_ch   = NaN;
         cfg.respi    = NaN;
+        cfg.heart    = NaN;
         cfg.baphy_train_gap_s = NaN;
 end
 
@@ -211,6 +214,8 @@ end
 
 % out_file = fullfile(datapath, 'channel_cfg.mat');
 % save(out_file, 'cfg');
+%
 % disp(['Saved cfg to: ' out_file])
 % disp('----------------------------------')
+%
 end
