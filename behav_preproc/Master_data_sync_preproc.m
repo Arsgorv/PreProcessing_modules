@@ -82,7 +82,7 @@ for sess = 1:numel(sessions)
         elseif strcmp(project,'RA')
             disp('  [6] Parsing Baphy file (RA_parse_baphy_active)...')
             % RA training (single mfile) vs RA experiment (Conditioning+PostTest)
-            isRAexp = ~isempty(dir(fullfile(datapath,'ephys','*_RA_PreSleep*'))) || ...
+            isRAexp = ~isempty(dir(fullfile(datapath,'ephys','*_RA_Conditioning*'))) || ...
                 ~isempty(dir(fullfile(datapath,'ephys','*_RA_PostTest*')));
             
             if ~isRAexp
