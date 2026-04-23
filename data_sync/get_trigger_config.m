@@ -23,7 +23,7 @@ cfg.OneBox   = NaN;
 
 
 % Detect animal from datapath
-animals = {'Ficello','Kiri','Edel','Chabichou','Kosichka','Tvorozhok','Shropshire','Brynza','Labneh','Mochi','Brayon'};
+animals = {'Ficello','Kiri','Edel','Chabichou','Kosichka','Tvorozhok','Shropshire','Brynza','Labneh','Mochi','Brayon', 'Droujba'};
 animal_name = '';
 for i = 1:numel(animals)
     if contains(datapath, animals{i})
@@ -119,6 +119,30 @@ switch animal_name
             cfg.eye_ch   = 59;
             cfg.baphy_train_gap_s = 0.10;
         end
+    case {'Droujba'} % training
+        if contains(datapath, 'training')        
+            cfg.fus_ch   = [];
+            cfg.emg      = 0;
+            cfg.ob       = 11;
+            cfg.respi    = 19;
+            cfg.heart    = 20;
+            cfg.OneBox   = [];
+            cfg.baphy_ch = 22;
+            cfg.face_ch  = 23;
+            cfg.eye_ch   = 24;
+            cfg.baphy_train_gap_s = 0.10;
+        elseif contains(datapath, 'experiment')
+            cfg.fus_ch   = [];
+            cfg.emg      = 34;
+            cfg.ob       = 46;
+            cfg.respi    = 54;
+            cfg.heart    = 55;
+            cfg.OneBox   = 56;
+            cfg.baphy_ch = 57;
+            cfg.face_ch  = 58;
+            cfg.eye_ch   = 59;
+            cfg.baphy_train_gap_s = 0.10;
+        end        
     case {'Brayon'}
         cfg.fus_ch   = [];
         cfg.respi    = 19;
