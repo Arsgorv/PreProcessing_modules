@@ -33,6 +33,9 @@ if ~isfield(opts,'chunk_s'), opts.chunk_s = 60; end
 if ~isfield(opts,'save_style'), opts.save_style = 'per_channel'; end
 if ~isfield(opts,'auto_threshold'), opts.auto_threshold = 64; end
 if ~isfield(opts,'allow_large_per_channel'), opts.allow_large_per_channel = false; end
+if ~isfield(opts,'probe'), opts.probe = 'auto'; end   % 'auto' | 'A' | 'B'
+if ~isfield(opts,'segments'),      opts.segments      = {}; end      % optional: basenames of ephys subfolders, in concatenation order
+if ~isfield(opts,'require_manifest'), opts.require_manifest = false; end % if true, error when RAExp manifest is missing
 
 TsRate = 1e4;
 
@@ -41,20 +44,30 @@ for s = 1:numel(sessions)
     disp('------------------------------------------')
     disp(['[Master_LFP_NP_preproc] ' datapath])
 
-    outDir = fullfile(datapath,'ephys','LFPDataNP');
+    outDir   = fullfile(datapath,'ephys','LFPDataNP');
+    obDir    = fullfile(datapath,'ephys','LFPData');
     if ~exist(outDir,'dir'), mkdir(outDir); end
+    % obDir is only written into when channel numbers don't collide with
+    % existing OB LFPs. mkdir lazily inside save_lfp_dual.
 
     % ---------------- segments on MASTER axis ----------------
-    mf = fullfile(datapath,'analysis','run_manifest_RAexp.mat');
-    if exist(mf,'file') == 2
-        Srun = load(mf,'RUN'); RUN = Srun.RUN;
-        segs = RUN.segments;
-        for i = 1:numel(segs)
-            segs(i).t0_ts = segs(i).t0_s * TsRate;
-            segs(i).t1_ts = segs(i).t1_s * TsRate;
-        end
-    else
-        error('Master_LFP_NP_preproc:NeedManifest','Missing run_manifest_RAexp.mat. Required for correct master boundaries.');
+    segs = np_build_segments(datapath, opts);
+    if isempty(segs)
+        warning('[Master_LFP_NP_preproc] No segments to process for %s; skipping.', datapath);
+        continue
+    end
+    fprintf('[Master_LFP_NP_preproc] %d segment(s) on master timeline:\n', numel(segs));
+    for i = 1:numel(segs)
+        fprintf('  %2d %-60s t0=%8.2fs  dur=%8.2fs\n', i, segs(i).name, segs(i).t0_s, segs(i).dur_s);
+    end
+    
+    obLfp = dir(fullfile(datapath,'ephys','*.lfp'));
+    if ~isempty(obLfp)
+        obBytes = obLfp(1).bytes;
+        % You'd need nChan_OB and Fs_OB from the OB .xml; skip if unavailable
+        % obDur = obBytes / (2 * nChan_OB * Fs_OB);
+        % mismatch = obDur - segs(end).t1_s;
+        % warn if abs(mismatch) > 1
     end
 
     % ---------------- channel list ----------------
@@ -79,6 +92,8 @@ for s = 1:numel(sessions)
     end
 
     Fs_ds_bySeg = nan(numel(segs),1);
+    syncBySeg = nan(numel(segs),1);
+    probeBySeg = cell(numel(segs),1);
     matFiles = {};
 
     % =====================================================================
@@ -88,17 +103,29 @@ for s = 1:numel(sessions)
 
         for i = 1:numel(segs)
             segFolder = fullfile(datapath,'ephys', segs(i).name);
-            streamRoot = oe_find_stream(segFolder, 'ProbeA-LFP');
+            [streamRoot, probeUsed] = resolve_np_lfp_stream(segFolder, opts.probe);
             if isempty(streamRoot)
-                warning('  no ProbeA-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
-            end
-            streamRoot = oe_find_stream(segFolder, 'ProbeB-LFP');
-            if isempty(streamRoot)
-                warning('  no ProbeB-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
+                warning('  no Probe%s-LFP stream in %s; skipping segment', opts.probe, segs(i).name);
                 continue
             end
 
             [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
+            % Sync metric: how far NP LFP stream deviates from master seg length
+            try
+                npSamples = oe_nSamples_stream(streamRoot, nCh);
+                npDur_s   = double(npSamples) / double(Fs);
+                masterDur_s = (segs(i).t1_ts - segs(i).t0_ts) / TsRate;
+                drift_s = npDur_s - masterDur_s;
+                syncBySeg(i) = drift_s; %#ok<AGROW>
+                if abs(drift_s) > 0.050
+                    warning('[%s] NP LFP vs master duration drift = %.3f s (NP=%.3f, master=%.3f)', ...
+                        segs(i).name, drift_s, npDur_s, masterDur_s);
+                end
+            catch ME
+                warning('[%s] could not measure NP-vs-master drift: %s', segs(i).name, ME.message);
+                syncBySeg(i) = NaN; %#ok<AGROW>
+            end
+            
             if ~isfinite(Fs), Fs = 2500; end
             if ~isfinite(nCh), nCh = 384; end
             Rraw = Fs / opts.lfp_fs;
@@ -132,6 +159,7 @@ for s = 1:numel(sessions)
             save(outMat, 't0_ts','dt_ts','nOut','chUse','Fs_ds','-append');
 
             Fs_ds_bySeg(i) = Fs_ds;
+            probeBySeg{i} = probeUsed;
             matFiles{end+1} = outMat; 
             disp(['  saved mat: ' outMat]);
         end
@@ -148,24 +176,42 @@ for s = 1:numel(sessions)
 
         for i = 1:numel(segs)
             segFolder = fullfile(datapath,'ephys', segs(i).name);
-            streamRoot = oe_find_stream(segFolder, 'ProbeA-LFP');
+            [streamRoot, probeUsed] = resolve_np_lfp_stream(segFolder, opts.probe);
             if isempty(streamRoot)
-                warning('  no ProbeA-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
-            end
-            streamRoot = oe_find_stream(segFolder, 'ProbeB-LFP');
-            if isempty(streamRoot)
-                warning('  no ProbeB-LFP in %s. Searching for ProbeB-LFP', segs(i).name);
+                warning('  no Probe%s-LFP stream in %s; skipping segment', opts.probe, segs(i).name);
                 continue
             end
 
             [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
-            if ~isfinite(Fs), Fs = 2500; end
-            if ~isfinite(nCh), nCh = 384; end
-            
-            Rraw = Fs / opts.lfp_fs;
-            R = round(Rraw);
-            if abs(Rraw - R) > 1e-6
-                warning('Fs=%.3f not integer divisible by targetFs=%.3f. Using R=%d (Fs_ds=%.3f).', Fs, opts.lfp_fs, R, Fs/R);
+            if ~isfinite(Fs),  Fs  = 2500; end
+            if ~isfinite(nCh), nCh = 384;  end
+
+            % ---- sync metric (NP stream vs master segment length) ----
+            try
+                npSamples   = oe_nSamples_stream(streamRoot, nCh);
+                npDur_s     = double(npSamples) / double(Fs);
+                masterDur_s = (segs(i).t1_ts - segs(i).t0_ts) / TsRate;
+                drift_s     = npDur_s - masterDur_s;
+                syncBySeg(i) = drift_s;
+                if abs(drift_s) > 0.500
+                    warning('[%s] NP LFP vs master drift = %.3f s (NP=%.3f, master=%.3f)', ...
+                        segs(i).name, drift_s, npDur_s, masterDur_s);
+                else
+                    fprintf('  [%s] drift %+0.3f s (within tolerance)\n', segs(i).name, drift_s);
+                end
+            catch ME
+                warning('[%s] could not measure drift: %s', segs(i).name, ME.message);
+                syncBySeg(i) = NaN;
+            end
+
+            R     = max(1, round(Fs / opts.lfp_fs));
+            Fs_ds = Fs / R;
+
+            dt_ts_real = TsRate / Fs_ds;
+            dt_ts      = round(dt_ts_real);
+            if abs(dt_ts_real - dt_ts) > 1e-9
+                warning('dt_ts not integer (TsRate/Fs_ds). TsRate=%g Fs_ds=%g dt_ts=%g', ...
+                    TsRate, Fs_ds, dt_ts_real);
             end
 
             keep = (chList >= 1) & (chList <= nCh);
@@ -174,55 +220,58 @@ for s = 1:numel(sessions)
 
             segStart_ts = double(segs(i).t0_ts);
             segStop_ts  = double(segs(i).t1_ts);
-
-            % integer downsample
-            R = max(1, round(Fs / opts.lfp_fs));
-            Fs_ds = Fs / R;
-
-            dt_ts_real = TsRate / Fs_ds;
-            dt_ts = round(dt_ts_real);
-            if abs(dt_ts_real - dt_ts) > 1e-9
-                warning('dt_ts not integer (TsRate/Fs_ds). TsRate=%g Fs_ds=%g dt_ts=%g', TsRate, Fs_ds, dt_ts_real);
-            end
-
-            % max samples allowed so that t(end) < segStop_ts
-            maxNOut = floor((segStop_ts - segStart_ts) / dt_ts);
+            maxNOut     = floor((segStop_ts - segStart_ts) / dt_ts);
             if maxNOut < 1
                 warning('Bad segment boundaries: %s (stop<=start)', segs(i).name);
                 continue
             end
 
-            [Yseg, Fs_ds2] = oe_extract_channels_lfp_fread( ...
-                streamRoot, chUse, nCh, Fs, opts.lfp_fs, opts.maxChunkMB, opts.chunk_s, maxNOut);
+            % ---- read full segment for the requested channels (int16) ----
+            Xs = oe_read_channels_full_segment( ...
+                streamRoot, chUse, nCh, Fs, opts.maxChunkMB, opts.chunk_s, maxNOut*R);
+            if isempty(Xs), continue; end
 
-            if isempty(Yseg), continue; end
-            Fs_ds_bySeg(i) = Fs_ds2;
+            % ---- zero-phase decimation (or passthrough if R==1) ----
+            if R > 1
+                % decimate uses Chebyshev I + filtfilt (zero phase). Output length
+                % matches ceil(size(Xs,2)/R), no group-delay trim required.
+                Yseg = zeros(ceil(size(Xs,2)/R), numel(chUse), 'int16');
+                for jj = 1:numel(chUse)
+                    y = decimate(double(Xs(jj,:)), R);
+                    Yseg(1:numel(y), jj) = int16(y);
+                end
+            else
+                Yseg = Xs.';
+            end
 
-            % build time from MASTER start
+            % clamp to master segment budget (removes NP's drift overshoot)
+            if size(Yseg,1) > maxNOut
+                Yseg = Yseg(1:maxNOut, :);
+            end
+
+            Fs_ds_bySeg(i) = Fs_ds;
+            probeBySeg{i}  = probeUsed;
+
+            % master-aligned time axis for this segment
             t_ts = segStart_ts + (0:size(Yseg,1)-1)' * dt_ts;
 
-            % append parts per channel, trimming any accidental overlap
+            % append per channel, trimming any accidental overlap
             for jj = 1:numel(chUse)
                 ch = chUse(jj);
-                j = find(chList == ch, 1, 'first');
-
-                y = Yseg(:,jj);
+                j  = find(chList == ch, 1, 'first');
+                y  = Yseg(:,jj);
 
                 if ~isempty(parts{j})
                     prev = Range(parts{j}{end});
                     prevEnd = prev(end);
-
                     if t_ts(1) <= prevEnd
                         kk = (t_ts > prevEnd);
-                        t_ts2 = t_ts(kk);
-                        y2 = y(kk);
+                        t_ts2 = t_ts(kk); y2 = y(kk);
                     else
-                        t_ts2 = t_ts;
-                        y2 = y;
+                        t_ts2 = t_ts; y2 = y;
                     end
                 else
-                    t_ts2 = t_ts;
-                    y2 = y;
+                    t_ts2 = t_ts; y2 = y;
                 end
 
                 if ~isempty(t_ts2)
@@ -230,15 +279,10 @@ for s = 1:numel(sessions)
                 end
             end
         end
-
+        
         % save per channel
         for j = 1:nSel
             ch = chList(j);
-            outFile = fullfile(outDir, ['LFP' num2str(ch) '.mat']);
-            if exist(outFile,'file')==2 && ~opts.force
-                disp(['  skip existing: ' outFile]);
-                continue
-            end
             if isempty(parts{j})
                 warning('  no data exported for ch %d', ch);
                 continue
@@ -250,8 +294,14 @@ for s = 1:numel(sessions)
             end
             temp = double(Data(LFP));
             LFP = tsd(Range(LFP), temp);
-            save(outFile,'LFP','-v7.3');
-            disp(['  saved: ' outFile]);
+
+            [writtenNP, writtenOB] = save_lfp_dual(outDir, obDir, ch, LFP, opts.force);
+            if writtenOB
+                disp(['  saved: LFPData/LFP'   num2str(ch) '.mat (OB-compat)']);
+            end
+            if writtenNP
+                disp(['  saved: LFPDataNP/LFP' num2str(ch) '.mat']);
+            end
         end
 
     else
@@ -271,6 +321,9 @@ for s = 1:numel(sessions)
     Info.Fs_ds_bySeg = Fs_ds_bySeg;
     Info.segments = {segs.name};
     Info.matFiles = matFiles;
+    Info.probeBySeg = probeBySeg;
+    Info.probe_requested = opts.probe;
+    Info.sync_drift_s_bySeg = syncBySeg;
 
     save(fullfile(outDir,'InfoLFP_NP.mat'), 'Info');
 
@@ -280,16 +333,22 @@ end
 
 % ============================ helpers ============================
 
-function segs = list_ephys_segments_simple(datapath)
-ephysDir = fullfile(datapath,'ephys');
-D = dir(ephysDir);
-D = D([D.isdir]);
-D = D(~ismember({D.name},{'.','..','LFPData','LFPDataNP'}));
-[~,ord] = sort([D.datenum]);
-D = D(ord);
-segs = struct('name',{},'t0_s',{},'t0_ts',{},'dur_s',{},'t1_s',{},'t1_ts',{});
-for i = 1:numel(D)
-    segs(i).name = D(i).name; 
+function [streamRoot, probeUsed] = resolve_np_lfp_stream(segFolder, probePref)
+% Try requested probe first; fall back to the other probe if not present.
+probeUsed = '';
+streamRoot = '';
+switch lower(probePref)
+    case 'a', order = {'ProbeA-LFP','ProbeB-LFP'};
+    case 'b', order = {'ProbeB-LFP','ProbeA-LFP'};
+    otherwise, order = {'ProbeA-LFP','ProbeB-LFP'};  % 'auto'
+end
+for k = 1:numel(order)
+    s = oe_find_stream(segFolder, order{k});
+    if ~isempty(s)
+        streamRoot = s;
+        probeUsed  = order{k};
+        return
+    end
 end
 end
 
@@ -363,6 +422,211 @@ if ~isempty(s1)
 end
 end
 
+function segs = np_build_segments(datapath, opts)
+% Build a segments list on the master timeline, in this priority order:
+%   1. opts.segments                                   (explicit override)
+%   2. analysis/run_manifest_RAexp.mat                 (RAExp pipeline)
+%   3. ephys/ExpeInfo.mat FolderForConcatenation_Ephys (matches OB ndm_concatenate)
+%   4. Interactive listdlg on ephys/ subfolders        (generic fallback)
+%
+% Returns a struct array with fields:
+%   name, path, dur_s, t0_s, t1_s, t0_ts, t1_ts
+% Durations are read from the Acquisition Board stream so NP LFP lands on
+% exactly the same timeline as the OB .lfp concatenation.
+
+TsRate = 1e4;
+ephysDir = fullfile(datapath,'ephys');
+segs = [];
+
+% --- (1) explicit override ---
+if isfield(opts,'segments') && ~isempty(opts.segments)
+    names = opts.segments;
+    if ischar(names), names = {names}; end
+    segs = build_segs_from_names(ephysDir, names, TsRate);
+    fprintf('[np_build_segments] using opts.segments (%d)\n', numel(segs));
+    return
+end
+
+% --- (2) RAExp manifest ---
+mf = fullfile(datapath,'analysis','run_manifest_RAexp.mat');
+if exist(mf,'file') == 2
+    Srun = load(mf,'RUN'); RUN = Srun.RUN;
+    segs = RUN.segments;
+    for i = 1:numel(segs)
+        segs(i).t0_ts = segs(i).t0_s * TsRate;
+        segs(i).t1_ts = segs(i).t1_s * TsRate;
+        if ~isfield(segs,'path') || isempty(segs(i).path)
+            segs(i).path = fullfile(ephysDir, segs(i).name);
+        end
+    end
+    fprintf('[np_build_segments] using RAExp manifest (%d segments)\n', numel(segs));
+    return
+end
+
+if isfield(opts,'require_manifest') && opts.require_manifest
+    error('Master_LFP_NP_preproc:NeedManifest', ...
+        'opts.require_manifest=true but no run_manifest_RAexp.mat at %s', mf);
+end
+
+% --- (3) ExpeInfo concatenation list ---
+eiFile = fullfile(ephysDir,'ExpeInfo.mat');
+if exist(eiFile,'file') == 2
+    try
+        S = load(eiFile,'ExpeInfo');
+        folders = S.ExpeInfo.PreProcessingInfo.FolderForConcatenation_Ephys;
+        if ~iscell(folders), folders = {folders}; end
+        names = cell(1,numel(folders));
+        ok = true(1,numel(folders));
+        for i = 1:numel(folders)
+            [~, names{i}] = fileparts(folders{i});
+            ok(i) = exist(fullfile(ephysDir, names{i}), 'dir') == 7;
+        end
+        if any(ok) && all(ok)
+            segs = build_segs_from_names(ephysDir, names, TsRate);
+            fprintf('[np_build_segments] using ExpeInfo.FolderForConcatenation_Ephys (%d segments)\n', numel(segs));
+            return
+        else
+            fprintf('[np_build_segments] ExpeInfo list does not match ephys/ subfolders; falling back to picker\n');
+            for i = 1:numel(folders)
+                if ~ok(i), fprintf('    missing: %s\n', names{i}); end
+            end
+        end
+    catch ME
+        warning('Could not parse ExpeInfo for segment list: %s', ME.message);
+    end
+end
+
+% --- (4) interactive picker ---
+segs = pick_segments_interactive(ephysDir, TsRate);
+end
+
+function Xs = oe_read_channels_full_segment(streamRoot, chList, nCh, Fs, maxChunkMB, chunk_s, maxSamples)
+% Read the full segment for a subset of channels into memory as int16.
+% Xs is [nSel x nSamples]. Uses chunked fread so total peak RAM ~= chunk size.
+Xs = [];
+datFile = fullfile(streamRoot,'continuous.dat');
+if exist(datFile,'file') ~= 2, return; end
+
+info = dir(datFile);
+nSamples = floor(double(info.bytes) / (2*double(nCh)));
+if isfinite(maxSamples) && maxSamples > 0
+    nSamples = min(nSamples, maxSamples);
+end
+if nSamples <= 0, return; end
+
+chList = unique(chList(:))';
+nSel   = numel(chList);
+if nSel == 0, return; end
+
+[chunkN, ~] = pick_chunk_size(Fs, nCh, maxChunkMB, chunk_s, 1);
+
+Xs = zeros(nSel, nSamples, 'int16');
+
+fid = fopen(datFile,'r');
+if fid < 0, Xs = []; return; end
+cleaner = onCleanup(@() fclose(fid));  %#ok<NASGU>
+
+pos = 1;
+s0  = 1;
+while s0 <= nSamples
+    nRead = min(chunkN, nSamples - s0 + 1);
+    X = fread(fid, [nCh nRead], 'int16=>int16');
+    if isempty(X), break; end
+    k = size(X,2);
+    Xs(:, pos:pos+k-1) = X(chList, :);
+    pos = pos + k;
+    s0  = s0 + nRead;
+end
+Xs = Xs(:, 1:pos-1);
+end
+
+function segs = build_segs_from_names(ephysDir, names, TsRate)
+segs = struct('name',{},'path',{},'dur_s',{},'t0_s',{},'t1_s',{},'t0_ts',{},'t1_ts',{});
+t0 = 0;
+for i = 1:numel(names)
+    nm = names{i};
+    segPath = fullfile(ephysDir, nm);
+    if exist(segPath,'dir') ~= 7
+        warning('Segment folder not found, skipping: %s', segPath);
+        continue
+    end
+    dur_s = oe_segment_acq_duration(segPath);
+    if ~isfinite(dur_s) || dur_s <= 0
+        warning('Could not determine duration for %s; skipping', nm);
+        continue
+    end
+    segs(end+1).name  = nm;                                 %#ok<AGROW>
+    segs(end).path    = segPath;
+    segs(end).dur_s   = dur_s;
+    segs(end).t0_s    = t0;
+    segs(end).t1_s    = t0 + dur_s;
+    segs(end).t0_ts   = segs(end).t0_s * TsRate;
+    segs(end).t1_ts   = segs(end).t1_s * TsRate;
+    t0 = segs(end).t1_s;
+end
+end
+
+function segs = pick_segments_interactive(ephysDir, TsRate)
+D = dir(ephysDir);
+D = D([D.isdir]);
+D = D(~ismember({D.name}, ...
+    {'.','..','LFPData','LFPDataNP','ChannelsToAnalyse','analysis','figures','video'}));
+if isempty(D)
+    error('np_build_segments:NoSubfolders','No candidate subfolders under %s', ephysDir);
+end
+
+% Sort by parsed 'yyyy-mm-dd_HH-MM-SS' if present, else by name
+tSort = nan(numel(D),1);
+for i = 1:numel(D)
+    tok = regexp(D(i).name, '(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})', 'tokens','once');
+    if ~isempty(tok)
+        try
+            tSort(i) = datenum([tok{1} ' ' strrep(tok{2},'-',':')],'yyyy-mm-dd HH:MM:SS'); %#ok<DATNM>
+        catch
+        end
+    end
+end
+if all(~isfinite(tSort))
+    [~,ord] = sort({D.name});
+else
+    [~,ord] = sort(tSort);
+end
+D = D(ord);
+names = {D.name};
+
+[sel, ok] = listdlg( ...
+    'PromptString', {'Select ephys segments to concatenate', ...
+                     'Hold Ctrl/Shift to pick multiple. Order = list order.'}, ...
+    'ListString', names, ...
+    'SelectionMode','multiple', ...
+    'InitialValue', 1:numel(names), ...
+    'ListSize',[560 420], ...
+    'Name','NP LFP: select segments');
+if ~ok || isempty(sel)
+    error('np_build_segments:UserCancel','User cancelled segment selection.');
+end
+segs = build_segs_from_names(ephysDir, names(sel), TsRate);
+end
+
+function dur_s = oe_segment_acq_duration(segPath)
+% Prefer Acquisition Board duration (so timeline matches OB .lfp concatenation),
+% then fall back to probe streams if AcqBoard is missing.
+keys = {'Acquisition_Board','Rhythm_FPGA','ProbeA-LFP','ProbeB-LFP'};
+dur_s = NaN;
+for k = 1:numel(keys)
+    streamRoot = oe_find_stream(segPath, keys{k});
+    if isempty(streamRoot), continue; end
+    [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
+    if ~isfinite(Fs), continue; end
+    if ~isfinite(nCh), nCh = 80; end
+    nSamp = oe_nSamples_stream(streamRoot, nCh);
+    if isfinite(nSamp) && nSamp > 0
+        dur_s = double(nSamp) / double(Fs);
+        return
+    end
+end
+end
+
 function dur_s = oe_segment_duration_seconds(segFolder, streamKey)
 streamRoot = oe_find_stream(segFolder, streamKey);
 if isempty(streamRoot)
@@ -406,7 +670,7 @@ n = str2double(tok{1});
 end
 
 function [Y_ds, Fs_ds] = oe_extract_channels_lfp_fread(streamRoot, chList, nCh, Fs, targetFs, maxChunkMB, chunk_s, maxNOut)
-% Fast chunked extraction using fread on contiguous blocks.
+% Chunked extraction with anti-alias lowpass before decimation.
 % If maxNOut provided, do not exceed master segment boundary.
 
 datFile = fullfile(streamRoot,'continuous.dat');
@@ -421,7 +685,7 @@ if nargin < 5 || isempty(targetFs), targetFs = Fs; end
 
 chList = unique(chList(:))';
 nSel = numel(chList);
-if nSel==0
+if nSel == 0
     Y_ds = []; Fs_ds = NaN; return
 end
 
@@ -438,56 +702,74 @@ if isfinite(maxNOut) && maxNOut > 0
     nSamples = min(nSamples, maxNOut * R);
 end
 
-maxBytes = maxChunkMB * 1024^2;
-chunkN = floor(maxBytes / (2*double(nCh)));
-chunkN = max(R, floor(chunkN/R)*R);
-chunkN = max(chunkN, Fs * 2);
-chunkN = min(chunkN, Fs * 120);
+[chunkN, R] = pick_chunk_size(Fs, nCh, maxChunkMB, chunk_s, R);
 
-if isfinite(chunk_s) && chunk_s > 0
-    chunkN2 = floor(chunk_s * Fs);
-    chunkN2 = max(R, floor(chunkN2/R)*R);
-    chunkN = min(chunkN, chunkN2);
+% Anti-alias filter (active only when R > 1)
+[bAA, grpDelay] = design_aa_fir(R);
+haveAA = ~isempty(bAA);
+if haveAA
+    aaState = zeros(numel(bAA)-1, nSel);
+else
+    aaState = [];
 end
 
-nOutEst = floor(nSamples / R);
+% Over-allocate outputs by grpDelay/R samples; we will trim group delay at end.
+nOutEst = floor(nSamples / R) + 8;
 Y_ds = zeros(nOutEst, nSel, 'int16');
 
 fid = fopen(datFile,'r');
-if fid < 0
-    Y_ds = []; Fs_ds = NaN; return
-end
+if fid < 0, Y_ds = []; Fs_ds = NaN; return; end
+cleaner = onCleanup(@() fclose(fid));
 
 pos = 1;
 s0 = 1;
+phaseOffset = 0;   % sample index within input for next kept output
 while s0 <= nSamples
     nRead = min(chunkN, nSamples - s0 + 1);
-
     X = fread(fid, [nCh nRead], 'int16=>int16');
     if isempty(X), break; end
 
-    Xs = X(chList, :);
-    Xd = Xs(:, 1:R:end);
-    k  = size(Xd,2);
+    Xs = X(chList, :);                       % [nSel x nRead]
+    if haveAA
+        [Xf, aaState] = filter(bAA, 1, double(Xs), aaState, 2);  % filter along time
+    else
+        Xf = double(Xs);
+    end
 
-    if k > 0
+    % Sub-sample with continuous phase across chunk boundaries
+    idx = (1 + phaseOffset):R:size(Xf,2);
+    if ~isempty(idx)
+        Xd = int16(Xf(:, idx));
+        k = size(Xd, 2);
         Y_ds(pos:pos+k-1, :) = Xd.';
         pos = pos + k;
     end
 
+    % Update phase for next chunk
+    usedUp = size(Xf,2) - (isempty(idx)*0 + (~isempty(idx) * idx(end)));
+    phaseOffset = mod(R - usedUp - 1, R);     % ensure next kept sample is R after last
+
     s0 = s0 + nRead;
 end
 
-fclose(fid);
 Y_ds = Y_ds(1:pos-1, :);
 
+% Compensate filter group delay: drop grpDelay/R samples from the start
+if haveAA
+    shift = round(grpDelay / R);
+    if shift > 0 && size(Y_ds,1) > shift
+        Y_ds = Y_ds(shift+1:end, :);
+    end
+end
+
+% Final clamp to master segment budget
 if isfinite(maxNOut) && maxNOut > 0 && size(Y_ds,1) > maxNOut
     Y_ds = Y_ds(1:maxNOut, :);
 end
 end
 
 function [Fs_ds, dt_ts, nOut] = oe_write_lfp_matrix_fread(streamRoot, outMat, chList, nCh, Fs, targetFs, maxChunkMB, chunk_s, segStart_ts, segStop_ts, TsRate)
-% Stream-write Y into outMat, clamped to master segment stop.
+% Stream-write filtered+decimated Y into outMat, clamped to master segment stop.
 
 datFile = fullfile(streamRoot,'continuous.dat');
 info = dir(datFile);
@@ -508,50 +790,120 @@ if maxNOut < 1
 end
 
 nSamplesLimit = min(nSamplesFile, maxNOut * R);
-nOutEst = floor(nSamplesLimit / R);
-
+nOutEst = floor(nSamplesLimit / R) + 8;
 nSel = numel(chList);
 
 M = matfile(outMat, 'Writable', true);
 M.Y = zeros(nOutEst, nSel, 'int16');
 
+[chunkN, R] = pick_chunk_size(Fs, nCh, maxChunkMB, chunk_s, R);
+
+[bAA, grpDelay] = design_aa_fir(R);
+haveAA = ~isempty(bAA);
+if haveAA
+    aaState = zeros(numel(bAA)-1, nSel);
+else
+    aaState = [];
+end
+
+fid = fopen(datFile,'r');
+if fid < 0, error('oe_write_lfp_matrix_fread:OpenFail','Cannot open %s', datFile); end
+cleaner = onCleanup(@() fclose(fid));
+
+pos = 1;
+s0 = 1;
+phaseOffset = 0;
+while s0 <= nSamplesLimit
+    nRead = min(chunkN, nSamplesLimit - s0 + 1);
+    X = fread(fid, [nCh nRead], 'int16=>int16');
+    if isempty(X), break; end
+
+    Xs = X(chList, :);
+    if haveAA
+        [Xf, aaState] = filter(bAA, 1, double(Xs), aaState, 2);
+    else
+        Xf = double(Xs);
+    end
+
+    idx = (1 + phaseOffset):R:size(Xf,2);
+    if ~isempty(idx)
+        Xd = int16(Xf(:, idx));
+        k = size(Xd,2);
+        M.Y(pos:pos+k-1, :) = Xd.';
+        pos = pos + k;
+    end
+
+    if ~isempty(idx)
+        phaseOffset = mod(R - (size(Xf,2) - idx(end)) - 1, R);
+    end
+    s0 = s0 + nRead;
+end
+
+% Group-delay is NOT trimmed: the linear-phase FIR introduces a constant
+% delay of grpDelay/Fs seconds in the output time axis. Downstream code
+% should subtract this offset from t0_ts if ms-level alignment matters.
+M.filter_group_delay_s = grpDelay / Fs;
+
+nOut = pos - 1;
+
+if nOut > maxNOut
+    Y = M.Y;
+    Y = Y(1:maxNOut, :);
+    nOut = maxNOut;
+    M.Y = Y;
+end
+end
+
+function [bAA, grpDelay] = design_aa_fir(R)
+% Return FIR anti-alias lowpass coefficients for integer decimation by R.
+% Normalized cutoff at 0.45 * (1/R) of Nyquist (targetFs/2 * 0.9 absolute).
+% Returns empty when R==1 (pass-through, no filter cost).
+if R <= 1
+    bAA = [];
+    grpDelay = 0;
+    return
+end
+N = max(30, 8*R);              % order scales with R; ~60 taps for R=2, 80 for R=10
+N = N + mod(N,2);              % even -> odd number of taps -> linear phase, integer delay
+Wn = 0.9 / R;                  % cutoff at 90% of new Nyquist
+bAA = fir1(N, Wn);             % Hamming-windowed FIR
+grpDelay = N/2;                % samples @ input Fs
+end
+
+function [chunkN, R] = pick_chunk_size(Fs, nCh, maxChunkMB, chunk_s, R)
 maxBytes = maxChunkMB * 1024^2;
 chunkN = floor(maxBytes / (2*double(nCh)));
 chunkN = max(R, floor(chunkN/R)*R);
 chunkN = max(chunkN, Fs * 2);
 chunkN = min(chunkN, Fs * 120);
-
-if nargin < 8 || isempty(chunk_s), chunk_s = 60; end
-if isfinite(chunk_s) && chunk_s > 0
+if nargin >= 4 && isfinite(chunk_s) && chunk_s > 0
     chunkN2 = floor(chunk_s * Fs);
     chunkN2 = max(R, floor(chunkN2/R)*R);
     chunkN = min(chunkN, chunkN2);
 end
-
-fid = fopen(datFile,'r');
-if fid < 0, error('oe_write_lfp_matrix_fread:OpenFail','Cannot open %s', datFile); end
-
-pos = 1;
-s0 = 1;
-while s0 <= nSamplesLimit
-    nRead = min(chunkN, nSamplesLimit - s0 + 1);
-
-    X = fread(fid, [nCh nRead], 'int16=>int16');
-    if isempty(X), break; end
-
-    Xs = X(chList, :);
-    Xd = Xs(:, 1:R:end);
-    k  = size(Xd,2);
-
-    if k > 0
-        M.Y(pos:pos+k-1, :) = Xd.';
-        pos = pos + k;
-    end
-
-    s0 = s0 + nRead;
 end
 
-fclose(fid);
+function [writtenNP, writtenOB] = save_lfp_dual(npDir, obDir, ch, LFP, force)
+% Save NP LFP into LFPDataNP always. Also mirror into LFPData if no collision.
+% Collision = LFPData/LFP<ch>.mat already exists on disk.
+writtenNP = false;
+writtenOB = false;
 
-nOut = pos - 1;
+% NP copy (always)
+if ~exist(npDir,'dir'), mkdir(npDir); end
+npFile = fullfile(npDir, ['LFP' num2str(ch) '.mat']);
+if exist(npFile,'file')~=2 || force
+    save(npFile, 'LFP', '-v7.3');
+    writtenNP = true;
+end
+
+% OB-compat copy, only if no collision
+obFile = fullfile(obDir, ['LFP' num2str(ch) '.mat']);
+if exist(obFile,'file') == 2
+    % Collision: do not touch OB copy (even with force), leave OB world untouched.
+    return
+end
+if ~exist(obDir,'dir'), mkdir(obDir); end
+save(obFile, 'LFP', '-v7.3');
+writtenOB = true;
 end
