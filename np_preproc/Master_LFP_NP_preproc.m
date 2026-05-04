@@ -36,6 +36,10 @@ if ~isfield(opts,'allow_large_per_channel'), opts.allow_large_per_channel = fals
 if ~isfield(opts,'probe'), opts.probe = 'auto'; end   % 'auto' | 'A' | 'B'
 if ~isfield(opts,'segments'),      opts.segments      = {}; end      % optional: basenames of ephys subfolders, in concatenation order
 if ~isfield(opts,'require_manifest'), opts.require_manifest = false; end % if true, error when RAExp manifest is missing
+if ~isfield(opts,'align_to_master'), opts.align_to_master = true; end   % linear NP->master time warp per segment
+if ~isfield(opts,'sync_method'),     opts.sync_method     = 'auto'; end  % 'auto' | 'ttl' | 'linear' | 'none'
+if ~isfield(opts,'master_stream'),   opts.master_stream   = 'Acquisition_Board'; end
+if ~isfield(opts,'sync_ttl_line'),   opts.sync_ttl_line   = []; end      % [] = any rising edge
 
 TsRate = 1e4;
 
@@ -43,13 +47,13 @@ for s = 1:numel(sessions)
     datapath = sessions{s};
     disp('------------------------------------------')
     disp(['[Master_LFP_NP_preproc] ' datapath])
-
+    
     outDir   = fullfile(datapath,'ephys','LFPDataNP');
     obDir    = fullfile(datapath,'ephys','LFPData');
     if ~exist(outDir,'dir'), mkdir(outDir); end
     % obDir is only written into when channel numbers don't collide with
     % existing OB LFPs. mkdir lazily inside save_lfp_dual.
-
+    
     % ---------------- segments on MASTER axis ----------------
     segs = np_build_segments(datapath, opts);
     if isempty(segs)
@@ -69,11 +73,11 @@ for s = 1:numel(sessions)
         % mismatch = obDur - segs(end).t1_s;
         % warn if abs(mismatch) > 1
     end
-
+    
     % ---------------- channel list ----------------
     chList = unique(opts.np_channels(:))';
     nSel = numel(chList);
-
+    
     % ---------------- choose mode ----------------
     save_style = lower(opts.save_style);
     if strcmp(save_style,'auto')
@@ -85,22 +89,23 @@ for s = 1:numel(sessions)
     else
         save_style_use = save_style;
     end
-
+    
     if strcmp(save_style_use,'per_channel') && (nSel >= opts.auto_threshold) && ~opts.allow_large_per_channel
         warning('Requested %d channels with per_channel. Switching to matrix mode. Set opts.allow_large_per_channel=true to override.', nSel);
         save_style_use = 'matrix';
     end
-
+    
     Fs_ds_bySeg = nan(numel(segs),1);
     syncBySeg = nan(numel(segs),1);
     probeBySeg = cell(numel(segs),1);
+    syncInfoBySeg = cell(numel(segs),1);
     matFiles = {};
-
+    
     % =====================================================================
     % MATRIX MODE (stream-write to avoid huge RAM; safe for 384 channels)
     % =====================================================================
     if strcmp(save_style_use,'matrix')
-
+        
         for i = 1:numel(segs)
             segFolder = fullfile(datapath,'ephys', segs(i).name);
             [streamRoot, probeUsed] = resolve_np_lfp_stream(segFolder, opts.probe);
@@ -108,72 +113,83 @@ for s = 1:numel(sessions)
                 warning('  no Probe%s-LFP stream in %s; skipping segment', opts.probe, segs(i).name);
                 continue
             end
-
+            
             [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
-            % Sync metric: how far NP LFP stream deviates from master seg length
+            if ~isfinite(Fs),  Fs  = 2500; end
+            if ~isfinite(nCh), nCh = 384;  end
+            
+            % drift sanity print
             try
-                npSamples = oe_nSamples_stream(streamRoot, nCh);
-                npDur_s   = double(npSamples) / double(Fs);
+                npSamples   = oe_nSamples_stream(streamRoot, nCh);
+                npDur_s     = double(npSamples) / double(Fs);
                 masterDur_s = (segs(i).t1_ts - segs(i).t0_ts) / TsRate;
-                drift_s = npDur_s - masterDur_s;
-                syncBySeg(i) = drift_s; %#ok<AGROW>
-                if abs(drift_s) > 0.050
-                    warning('[%s] NP LFP vs master duration drift = %.3f s (NP=%.3f, master=%.3f)', ...
-                        segs(i).name, drift_s, npDur_s, masterDur_s);
+                drift_s     = npDur_s - masterDur_s;
+                syncBySeg(i) = drift_s;
+                if abs(drift_s) > 0.500
+                    warning('[%s] NP vs master drift = %.3f s', segs(i).name, drift_s);
                 end
-            catch ME
-                warning('[%s] could not measure NP-vs-master drift: %s', segs(i).name, ME.message);
-                syncBySeg(i) = NaN; %#ok<AGROW>
+            catch
+                syncBySeg(i) = NaN;
             end
             
-            if ~isfinite(Fs), Fs = 2500; end
-            if ~isfinite(nCh), nCh = 384; end
-            Rraw = Fs / opts.lfp_fs;
-            R = round(Rraw);
-            if abs(Rraw - R) > 1e-6
-                warning('Fs=%.3f not integer divisible by targetFs=%.3f. Using R=%d (Fs_ds=%.3f).', Fs, opts.lfp_fs, R, Fs/R);
-            end
-
+            R = max(1, round(Fs/opts.lfp_fs));
+            Fs_ds = Fs/R;
+            dt_ts = round(TsRate/Fs_ds);
+            
             keep = (chList >= 1) & (chList <= nCh);
             if ~any(keep)
                 warning('  none of requested channels exist in %s', segs(i).name);
                 continue
             end
             chUse = chList(keep);
-
+            
             outMat = fullfile(outDir, ['LFPmat_' segs(i).name '.mat']);
             if exist(outMat,'file')==2 && ~opts.force
                 disp(['  skip existing mat: ' outMat]);
-                matFiles{end+1} = outMat; 
-                continue
+                matFiles{end+1} = outMat; continue %#ok<AGROW>
             end
-
+            
             segStart_ts = double(segs(i).t0_ts);
             segStop_ts  = double(segs(i).t1_ts);
-
-            [Fs_ds, dt_ts, nOut] = oe_write_lfp_matrix_fread( ...
+            
+            % build warp once per segment
+            wopts = struct('use_ttl_sync', ~strcmp(opts.sync_method,'linear') ...
+                && ~strcmp(opts.sync_method,'none'), ...
+                'sync_ttl_line', opts.sync_ttl_line);
+            [warpFn, warpInfo] = np_master_clock_warp( ...
+                segFolder, streamRoot, opts.master_stream, wopts);
+            if strcmp(opts.sync_method,'none'), warpFn = @(t) t; warpInfo.method='identity'; end
+            save_segment_sync(datapath, segs(i).name, warpFn, warpInfo);
+            
+            % channel-batched decimate + warp + write
+            chBatch = max(1, min(numel(chUse), ...
+                floor(opts.maxChunkMB * 1024^2 / (8 * (Fs * masterDur_s)))));
+            % heuristic: keep peak RAM per batch ~ maxChunkMB worth of doubles
+            [Fs_ds, dt_ts, nOut] = oe_write_lfp_matrix_warped( ...
                 streamRoot, outMat, chUse, nCh, Fs, opts.lfp_fs, ...
-                opts.maxChunkMB, opts.chunk_s, segStart_ts, segStop_ts, TsRate);
-
-            t0_ts = segStart_ts; 
+                segStart_ts, segStop_ts, TsRate, warpFn, chBatch, ...
+                opts.maxChunkMB, opts.chunk_s);
+            
+            t0_ts = segStart_ts;
             save(outMat, 't0_ts','dt_ts','nOut','chUse','Fs_ds','-append');
-
-            Fs_ds_bySeg(i) = Fs_ds;
-            probeBySeg{i} = probeUsed;
-            matFiles{end+1} = outMat; 
-            disp(['  saved mat: ' outMat]);
+            
+            Fs_ds_bySeg(i)   = Fs_ds;
+            probeBySeg{i}    = probeUsed;
+            syncInfoBySeg{i} = warpInfo;
+            matFiles{end+1}  = outMat; %#ok<AGROW>
+            disp(['  saved mat: ' outMat ' (sync method: ' warpInfo.method ')']);
         end
-
-    % =====================================================================
-    % PER-CHANNEL MODE (fast for ~10 channels; ensures no overlap)
-    % =====================================================================
+        
+        % =====================================================================
+        % PER-CHANNEL MODE (fast for ~10 channels; ensures no overlap)
+        % =====================================================================
     elseif strcmp(save_style_use,'per_channel')
-
+        
         parts = cell(1,nSel);
         for j = 1:nSel
             parts{j} = {};
         end
-
+        
         for i = 1:numel(segs)
             segFolder = fullfile(datapath,'ephys', segs(i).name);
             [streamRoot, probeUsed] = resolve_np_lfp_stream(segFolder, opts.probe);
@@ -181,11 +197,11 @@ for s = 1:numel(sessions)
                 warning('  no Probe%s-LFP stream in %s; skipping segment', opts.probe, segs(i).name);
                 continue
             end
-
+            
             [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
             if ~isfinite(Fs),  Fs  = 2500; end
             if ~isfinite(nCh), nCh = 384;  end
-
+            
             % ---- sync metric (NP stream vs master segment length) ----
             try
                 npSamples   = oe_nSamples_stream(streamRoot, nCh);
@@ -203,21 +219,21 @@ for s = 1:numel(sessions)
                 warning('[%s] could not measure drift: %s', segs(i).name, ME.message);
                 syncBySeg(i) = NaN;
             end
-
+            
             R     = max(1, round(Fs / opts.lfp_fs));
             Fs_ds = Fs / R;
-
+            
             dt_ts_real = TsRate / Fs_ds;
             dt_ts      = round(dt_ts_real);
             if abs(dt_ts_real - dt_ts) > 1e-9
                 warning('dt_ts not integer (TsRate/Fs_ds). TsRate=%g Fs_ds=%g dt_ts=%g', ...
                     TsRate, Fs_ds, dt_ts_real);
             end
-
+            
             keep = (chList >= 1) & (chList <= nCh);
             if ~any(keep), continue; end
             chUse = chList(keep);
-
+            
             segStart_ts = double(segs(i).t0_ts);
             segStop_ts  = double(segs(i).t1_ts);
             maxNOut     = floor((segStop_ts - segStart_ts) / dt_ts);
@@ -225,42 +241,56 @@ for s = 1:numel(sessions)
                 warning('Bad segment boundaries: %s (stop<=start)', segs(i).name);
                 continue
             end
-
+            
             % ---- read full segment for the requested channels (int16) ----
             Xs = oe_read_channels_full_segment( ...
                 streamRoot, chUse, nCh, Fs, opts.maxChunkMB, opts.chunk_s, maxNOut*R);
             if isempty(Xs), continue; end
-
+            
             % ---- zero-phase decimation (or passthrough if R==1) ----
+            % ---- decimation ----
             if R > 1
-                % decimate uses Chebyshev I + filtfilt (zero phase). Output length
-                % matches ceil(size(Xs,2)/R), no group-delay trim required.
-                Yseg = zeros(ceil(size(Xs,2)/R), numel(chUse), 'int16');
+                Y_np = zeros(ceil(size(Xs,2)/R), numel(chUse), 'double');
                 for jj = 1:numel(chUse)
-                    y = decimate(double(Xs(jj,:)), R);
-                    Yseg(1:numel(y), jj) = int16(y);
+                    Y_np(:,jj) = decimate(double(Xs(jj,:)), R);
                 end
             else
-                Yseg = Xs.';
+                Y_np = double(Xs.');
             end
-
-            % clamp to master segment budget (removes NP's drift overshoot)
-            if size(Yseg,1) > maxNOut
-                Yseg = Yseg(1:maxNOut, :);
+            
+            % ---- master-clock warp (TTL -> linear -> identity) ----
+            wopts = struct('use_ttl_sync', ~strcmp(opts.sync_method,'linear') ...
+                && ~strcmp(opts.sync_method,'none'), ...
+                'sync_ttl_line', opts.sync_ttl_line);
+            [warpFn, warpInfo] = np_master_clock_warp( ...
+                segFolder, streamRoot, opts.master_stream, wopts);
+            if strcmp(opts.sync_method,'none'), warpFn = @(t) t; warpInfo.method='identity'; end
+            save_segment_sync(datapath, segs(i).name, warpFn, warpInfo);
+            
+            nMaster = floor((segStop_ts - segStart_ts) / dt_ts);
+            t_np_s     = (0:size(Y_np,1)-1)' / Fs_ds;
+            t_np_in_m  = warpFn(t_np_s);
+            t_target_s = (0:nMaster-1)' / Fs_ds;
+            
+            Yseg = zeros(nMaster, numel(chUse), 'int16');
+            for jj = 1:numel(chUse)
+                yi = interp1(t_np_in_m, Y_np(:,jj), t_target_s, 'linear', 0);
+                Yseg(:,jj) = int16(yi);
             end
-
+            
             Fs_ds_bySeg(i) = Fs_ds;
             probeBySeg{i}  = probeUsed;
-
-            % master-aligned time axis for this segment
+            syncInfoBySeg{i} = warpInfo; %#ok<AGROW>
+            
             t_ts = segStart_ts + (0:size(Yseg,1)-1)' * dt_ts;
-
+            
+            
             % append per channel, trimming any accidental overlap
             for jj = 1:numel(chUse)
                 ch = chUse(jj);
                 j  = find(chList == ch, 1, 'first');
                 y  = Yseg(:,jj);
-
+                
                 if ~isempty(parts{j})
                     prev = Range(parts{j}{end});
                     prevEnd = prev(end);
@@ -273,7 +303,7 @@ for s = 1:numel(sessions)
                 else
                     t_ts2 = t_ts; y2 = y;
                 end
-
+                
                 if ~isempty(t_ts2)
                     parts{j}{end+1} = tsd(t_ts2, y2);
                 end
@@ -287,14 +317,14 @@ for s = 1:numel(sessions)
                 warning('  no data exported for ch %d', ch);
                 continue
             end
-
+            
             LFP = parts{j}{1};
             if numel(parts{j}) > 1
                 LFP = cat(parts{j}{:});
             end
             temp = double(Data(LFP));
             LFP = tsd(Range(LFP), temp);
-
+            
             [writtenNP, writtenOB] = save_lfp_dual(outDir, obDir, ch, LFP, opts.force);
             if writtenOB
                 disp(['  saved: LFPData/LFP'   num2str(ch) '.mat (OB-compat)']);
@@ -303,11 +333,11 @@ for s = 1:numel(sessions)
                 disp(['  saved: LFPDataNP/LFP' num2str(ch) '.mat']);
             end
         end
-
+        
     else
         error('Unknown opts.save_style: %s', opts.save_style);
     end
-
+    
     % ---------------- Info ----------------
     Info = struct();
     Info.np_channels = chList;
@@ -324,14 +354,21 @@ for s = 1:numel(sessions)
     Info.probeBySeg = probeBySeg;
     Info.probe_requested = opts.probe;
     Info.sync_drift_s_bySeg = syncBySeg;
-
+    Info.align_to_master = opts.align_to_master;
+    Info.sync_method_bySeg = cellfun(@(c) safefield(c,'method','unknown'), syncInfoBySeg, 'UniformOutput', false);
+    Info.sync_corr_bySeg   = cellfun(@(c) safefield(c,'peak_corr',NaN), syncInfoBySeg);
+    Info.sync_n_evts_bySeg = cellfun(@(c) safefield(c,'n_events',0),    syncInfoBySeg);
+    
     save(fullfile(outDir,'InfoLFP_NP.mat'), 'Info');
-
+    
 end
 
 end
 
 % ============================ helpers ============================
+function v = safefield(s,f,default)
+if isstruct(s) && isfield(s,f), v = s.(f); else, v = default; end
+end
 
 function [streamRoot, probeUsed] = resolve_np_lfp_stream(segFolder, probePref)
 % Try requested probe first; fall back to the other probe if not present.
@@ -353,16 +390,69 @@ end
 end
 
 function streamRoot = oe_find_stream(segFolder, key)
+% Find a stream folder under segFolder whose name contains `key` (case-insensitive
+% substring). Returns the first match that contains a continuous.dat file.
+% Tolerates both "fixed" (recording*/continuous/...) and Record-Node layouts.
 streamRoot = '';
-cand = dir(fullfile(segFolder,'recording*','continuous',['*' key '*']));
-if isempty(cand)
-    cand = dir(fullfile(segFolder,'Record Node*','experiment*','recording*','continuous',['*' key '*']));
-end
-for i = 1:numel(cand)
-    p = fullfile(cand(i).folder, cand(i).name);
-    if exist(fullfile(p,'continuous.dat'),'file')
-        streamRoot = p;
+contDirs = enumerate_continuous_dirs(segFolder);
+keyL = lower(key);
+
+% Prefer prefix match (e.g. 'Acquisition_Board' -> 'Acquisition_Board-100.acquisition_board')
+for i = 1:numel(contDirs)
+    [~, nm, ext] = fileparts(contDirs{i});
+    nmFull = [nm ext];
+    if startsWith(lower(nmFull), keyL) && exist(fullfile(contDirs{i},'continuous.dat'),'file') == 2
+        streamRoot = contDirs{i};
         return
+    end
+end
+% Fall back to substring match anywhere in the folder name
+for i = 1:numel(contDirs)
+    [~, nm, ext] = fileparts(contDirs{i});
+    nmFull = [nm ext];
+    if contains(lower(nmFull), keyL) && exist(fullfile(contDirs{i},'continuous.dat'),'file') == 2
+        streamRoot = contDirs{i};
+        return
+    end
+end
+end
+
+function dirs = enumerate_continuous_dirs(segFolder)
+% Return the list of leaf directories that sit directly under any .../continuous/
+% folder for the given segment, across both layouts.
+dirs = {};
+% (a) "fixed" layout: <seg>/recording*/continuous/<stream>/
+recs = dir(fullfile(segFolder,'recording*'));
+recs = recs([recs.isdir] & ~ismember({recs.name},{'.','..'}));
+for r = 1:numel(recs)
+    contPath = fullfile(recs(r).folder, recs(r).name, 'continuous');
+    if isfolder(contPath)
+        sub = dir(contPath);
+        sub = sub([sub.isdir] & ~ismember({sub.name},{'.','..'}));
+        for s = 1:numel(sub)
+            dirs{end+1} = fullfile(sub(s).folder, sub(s).name); %#ok<AGROW>
+        end
+    end
+end
+% (b) Record-Node layout: <seg>/Record Node */experiment*/recording*/continuous/<stream>/
+nodes = dir(fullfile(segFolder,'Record Node*'));
+nodes = nodes([nodes.isdir]);
+for n = 1:numel(nodes)
+    exps = dir(fullfile(nodes(n).folder, nodes(n).name, 'experiment*'));
+    exps = exps([exps.isdir]);
+    for e = 1:numel(exps)
+        recs2 = dir(fullfile(exps(e).folder, exps(e).name, 'recording*'));
+        recs2 = recs2([recs2.isdir]);
+        for r = 1:numel(recs2)
+            contPath = fullfile(recs2(r).folder, recs2(r).name, 'continuous');
+            if isfolder(contPath)
+                sub = dir(contPath);
+                sub = sub([sub.isdir] & ~ismember({sub.name},{'.','..'}));
+                for s = 1:numel(sub)
+                    dirs{end+1} = fullfile(sub(s).folder, sub(s).name); %#ok<AGROW>
+                end
+            end
+        end
     end
 end
 end
@@ -392,11 +482,31 @@ else
     streamShort = streamFolder;
 end
 
-key = ['"stream_name": "' streamShort '"'];
-ix = strfind(txt, key);
+% Anchor by folder_name first (always present), then fall back to stream_name.
+key1 = ['"folder_name": "' streamFolder '/"'];
+key2 = ['"folder_name": "' streamFolder '"'];
+key3 = ['"folder_name":"' streamFolder '/"'];
+key4 = ['"folder_name":"' streamFolder '"'];
+ix = [];
+for cand = {key1,key2,key3,key4}
+    ix = strfind(txt, cand{1});
+    if ~isempty(ix), break; end
+end
 if isempty(ix)
-    key = ['"stream_name":"', streamShort, '"'];
-    ix = strfind(txt, key);
+    % legacy fallback: try several stream_name variants
+    variants = {streamShort, ...
+        strrep(streamShort,'_',' '), ...
+        strrep(streamShort,'-',' '), ...
+        lower(streamShort), upper(streamShort)};
+    for v = 1:numel(variants)
+        for q = ["""", "'"]                                             %#ok<NBRAK2>
+            ix = strfind(txt, ['"stream_name": ' char(q) variants{v} char(q)]);
+            if ~isempty(ix), break; end
+            ix = strfind(txt, ['"stream_name":' char(q) variants{v} char(q)]);
+            if ~isempty(ix), break; end
+        end
+        if ~isempty(ix), break; end
+    end
     if isempty(ix), return; end
 end
 ix = ix(1);
@@ -596,7 +706,7 @@ names = {D.name};
 
 [sel, ok] = listdlg( ...
     'PromptString', {'Select ephys segments to concatenate', ...
-                     'Hold Ctrl/Shift to pick multiple. Order = list order.'}, ...
+    'Hold Ctrl/Shift to pick multiple. Order = list order.'}, ...
     'ListString', names, ...
     'SelectionMode','multiple', ...
     'InitialValue', 1:numel(names), ...
@@ -728,14 +838,14 @@ while s0 <= nSamples
     nRead = min(chunkN, nSamples - s0 + 1);
     X = fread(fid, [nCh nRead], 'int16=>int16');
     if isempty(X), break; end
-
+    
     Xs = X(chList, :);                       % [nSel x nRead]
     if haveAA
         [Xf, aaState] = filter(bAA, 1, double(Xs), aaState, 2);  % filter along time
     else
         Xf = double(Xs);
     end
-
+    
     % Sub-sample with continuous phase across chunk boundaries
     idx = (1 + phaseOffset):R:size(Xf,2);
     if ~isempty(idx)
@@ -744,11 +854,11 @@ while s0 <= nSamples
         Y_ds(pos:pos+k-1, :) = Xd.';
         pos = pos + k;
     end
-
+    
     % Update phase for next chunk
     usedUp = size(Xf,2) - (isempty(idx)*0 + (~isempty(idx) * idx(end)));
     phaseOffset = mod(R - usedUp - 1, R);     % ensure next kept sample is R after last
-
+    
     s0 = s0 + nRead;
 end
 
@@ -817,14 +927,14 @@ while s0 <= nSamplesLimit
     nRead = min(chunkN, nSamplesLimit - s0 + 1);
     X = fread(fid, [nCh nRead], 'int16=>int16');
     if isempty(X), break; end
-
+    
     Xs = X(chList, :);
     if haveAA
         [Xf, aaState] = filter(bAA, 1, double(Xs), aaState, 2);
     else
         Xf = double(Xs);
     end
-
+    
     idx = (1 + phaseOffset):R:size(Xf,2);
     if ~isempty(idx)
         Xd = int16(Xf(:, idx));
@@ -832,7 +942,7 @@ while s0 <= nSamplesLimit
         M.Y(pos:pos+k-1, :) = Xd.';
         pos = pos + k;
     end
-
+    
     if ~isempty(idx)
         phaseOffset = mod(R - (size(Xf,2) - idx(end)) - 1, R);
     end
@@ -852,6 +962,92 @@ if nOut > maxNOut
     nOut = maxNOut;
     M.Y = Y;
 end
+end
+
+function [Fs_ds, dt_ts, nOut] = oe_write_lfp_matrix_warped( ...
+    streamRoot, outMat, chList, nCh, Fs, targetFs, segStart_ts, segStop_ts, ...
+    TsRate, warpFn, chBatchSize, maxChunkMB, chunk_s)
+% Channel-batched matrix mode with master-clock warp.
+% Reads NP raw, decimates per channel, applies warpFn, writes int16 column.
+
+R = max(1, round(Fs/targetFs));
+Fs_ds = Fs/R;
+dt_ts_real = TsRate/Fs_ds;
+dt_ts = round(dt_ts_real);
+
+masterDur_s = (segStop_ts - segStart_ts) / TsRate;
+nMaster = floor(masterDur_s * Fs_ds);
+
+nSel = numel(chList);
+M = matfile(outMat, 'Writable', true);
+M.Y = zeros(nMaster, nSel, 'int16');
+
+t_target_s = (0:nMaster-1)' / Fs_ds;
+
+for b0 = 1:chBatchSize:nSel
+    b1 = min(b0 + chBatchSize - 1, nSel);
+    chBatch = chList(b0:b1);
+
+    Xs = oe_read_channels_full_segment(streamRoot, chBatch, nCh, Fs, ...
+                                       maxChunkMB, chunk_s, NaN);
+    if isempty(Xs), continue; end
+
+    if R > 1
+        Y_np = zeros(ceil(size(Xs,2)/R), numel(chBatch), 'double');
+        for jj = 1:numel(chBatch)
+            Y_np(:,jj) = decimate(double(Xs(jj,:)), R);
+        end
+    else
+        Y_np = double(Xs.');
+    end
+    clear Xs
+
+    t_np_s = (0:size(Y_np,1)-1)' / Fs_ds;
+    t_np_in_m = warpFn(t_np_s);
+
+    for jj = 1:numel(chBatch)
+        yi = interp1(t_np_in_m, Y_np(:,jj), t_target_s, 'linear', 0);
+        M.Y(:, b0 + jj - 1) = int16(yi);
+    end
+    fprintf('    batch %d-%d / %d done\n', b0, b1, nSel);
+end
+
+nOut = nMaster;
+end
+
+function save_segment_sync(datapath, segName, warpFn, warpInfo)
+% Persist the warp anchors so spike times can be aligned later via np_apply_master_warp.
+outDir = fullfile(datapath,'analysis');
+if ~exist(outDir,'dir'), mkdir(outDir); end
+outFile = fullfile(outDir, ['master_clock_sync_' segName '.mat']);
+
+method = warpInfo.method;
+S = struct();
+S.method = method;
+S.created = datestr(now);
+switch method
+    case {'ttl','oe-synchronizer'}
+        S.np_anchor_s     = warpInfo.np_event_times_s(:);
+        if isfield(warpInfo,'master_event_times_s')
+            S.master_anchor_s = warpInfo.master_event_times_s(:);
+        else
+            % oe-synchronizer: regenerate dense anchors from warpFn for portability
+            tt = linspace(0, warpInfo.npDur_s, 200)';
+            S.np_anchor_s     = tt;
+            S.master_anchor_s = warpFn(tt);
+        end
+        S.peak_corr = warpInfo.peak_corr;
+        S.n_events  = warpInfo.n_events;
+    case 'linear-ratio'
+        S.warp_ratio  = warpInfo.masterDur_s / max(warpInfo.npDur_s, eps);
+        S.npDur_s     = warpInfo.npDur_s;
+        S.masterDur_s = warpInfo.masterDur_s;
+    case {'identity-no-master','identity'}
+        % nothing extra
+    otherwise
+        warning('save_segment_sync: unknown method %s', method);
+end
+save(outFile, '-struct', 'S');
 end
 
 function [bAA, grpDelay] = design_aa_fir(R)
