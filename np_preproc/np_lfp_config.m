@@ -8,7 +8,7 @@ if contains(datapath, 'Tvorozhok')
     cfg.theta_channel = 350;
 elseif contains(datapath, 'Mochi')
     cfg.probe         = 'A';
-    cfg.channels      = 300;
-    cfg.theta_channel = 300;
+    cfg.channels      = 125;
+    cfg.theta_channel = 125;
 end
 end

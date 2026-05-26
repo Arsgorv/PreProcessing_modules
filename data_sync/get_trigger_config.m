@@ -154,13 +154,44 @@ switch animal_name
         cfg.baphy_train_gap_s = 0.10;
     case {'Ficello'}
         cfg.fus_ch   = 56;
+        cfg.emg      = [];
         cfg.baphy_ch = 55;
         cfg.face_ch  = 57;
         cfg.eye_ch   = [];
-        cfg.respi    = [];
-        cfg.heart    = 61;  
+        cfg.respi    = 58;
+        cfg.heart    = 60; %61  
         cfg.OneBox   = []; 
         cfg.baphy_train_gap_s = 0.10;
+    case {'Labneh'}
+        cfg.fus_ch   = [];
+        cfg.baphy_ch = [];
+        cfg.emg      = 19;
+        cfg.face_ch  = 42;
+        cfg.eye_ch   = [];
+        cfg.respi    = 35;
+        cfg.heart    = 36;  
+        cfg.OneBox   = []; 
+        cfg.baphy_train_gap_s = 0.10;       
+    case {'Shropshire'}
+        cfg.fus_ch   = [];
+        cfg.baphy_ch = 111;
+        cfg.face_ch  = 112;
+        cfg.emg      = 3;
+        cfg.eye_ch   = [];
+        cfg.respi    = 105;
+        cfg.heart    = 106; 
+        cfg.OneBox   = []; 
+        cfg.baphy_train_gap_s = 0.10;
+    case {'Brynza'}
+        cfg.fus_ch   = [];
+        cfg.baphy_ch = [];
+        cfg.emg      = 4;        
+        cfg.face_ch  = 42;
+        cfg.eye_ch   = [];
+        cfg.respi    = 35;
+        cfg.heart    = 36;  
+        cfg.OneBox   = []; 
+        cfg.baphy_train_gap_s = 0.10;        
     case {'Kiri'}
         cfg.fus_ch   = NaN;
         cfg.baphy_ch = NaN;
