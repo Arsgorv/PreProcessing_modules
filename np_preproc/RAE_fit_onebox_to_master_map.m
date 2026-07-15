@@ -12,7 +12,7 @@ if ~isfield(opts,'onebox_adc_idx'), opts.onebox_adc_idx = 3; end % ADC2 -> 3 (1-
 if ~isfield(opts,'minISI_s'), opts.minISI_s = 0.4; end
 if ~isfield(opts,'thr_master'), opts.thr_master = []; end
 if ~isfield(opts,'thr_onebox'), opts.thr_onebox = []; end
-if ~isfield(opts,'shift_search'), opts.shift_search = -5:5; end
+if ~isfield(opts,'shift_search'), opts.shift_search = -60:60; end % widened: -5:5 can clip device-start offset
 if ~isfield(opts,'chunk_s'), opts.chunk_s = 20; end % for scanning OneBox ADC
 if ~isfield(opts,'maxChunkMB'), opts.maxChunkMB = 64; end
 
@@ -257,16 +257,52 @@ tO2 = tOa(1:n);
 end
 
 function streamRoot = oe_find_stream(segFolder, key)
+% Robust: explicit enumeration + case-insensitive substring match.
+% (Avoids MATLAB multi-level dir() wildcard quirks that missed
+%  folders like 'Acquisition_Board-100.acquisition_board'.)
 streamRoot = '';
-cand = dir(fullfile(segFolder,'recording*','continuous',['*' key '*']));
-if isempty(cand)
-    cand = dir(fullfile(segFolder,'Record Node*','experiment*','recording*','continuous',['*' key '*']));
+contDirs = enumerate_continuous_dirs(segFolder);
+keyL = lower(key);
+for i = 1:numel(contDirs)
+    [~, nm, ext] = fileparts(contDirs{i});
+    if startsWith(lower([nm ext]), keyL) && exist(fullfile(contDirs{i},'continuous.dat'),'file')==2
+        streamRoot = contDirs{i}; return
+    end
 end
-for i = 1:numel(cand)
-    p = fullfile(cand(i).folder, cand(i).name);
-    if exist(fullfile(p,'continuous.dat'),'file')
-        streamRoot = p;
-        return
+for i = 1:numel(contDirs)
+    [~, nm, ext] = fileparts(contDirs{i});
+    if contains(lower([nm ext]), keyL) && exist(fullfile(contDirs{i},'continuous.dat'),'file')==2
+        streamRoot = contDirs{i}; return
+    end
+end
+end
+
+function dirs = enumerate_continuous_dirs(segFolder)
+dirs = {};
+recs = dir(fullfile(segFolder,'recording*'));
+recs = recs([recs.isdir] & ~ismember({recs.name},{'.','..'}));
+for r = 1:numel(recs)
+    contPath = fullfile(recs(r).folder, recs(r).name, 'continuous');
+    if isfolder(contPath)
+        sub = dir(contPath); sub = sub([sub.isdir] & ~ismember({sub.name},{'.','..'}));
+        for s = 1:numel(sub), dirs{end+1} = fullfile(sub(s).folder, sub(s).name); end %#ok<AGROW>
+    end
+end
+nodes = dir(fullfile(segFolder,'Record Node*'));
+nodes = nodes([nodes.isdir]);
+for n = 1:numel(nodes)
+    exps = dir(fullfile(nodes(n).folder, nodes(n).name, 'experiment*'));
+    exps = exps([exps.isdir]);
+    for e = 1:numel(exps)
+        recs2 = dir(fullfile(exps(e).folder, exps(e).name, 'recording*'));
+        recs2 = recs2([recs2.isdir]);
+        for r = 1:numel(recs2)
+            contPath = fullfile(recs2(r).folder, recs2(r).name, 'continuous');
+            if isfolder(contPath)
+                sub = dir(contPath); sub = sub([sub.isdir] & ~ismember({sub.name},{'.','..'}));
+                for s = 1:numel(sub), dirs{end+1} = fullfile(sub(s).folder, sub(s).name); end %#ok<AGROW>
+            end
+        end
     end
 end
 end

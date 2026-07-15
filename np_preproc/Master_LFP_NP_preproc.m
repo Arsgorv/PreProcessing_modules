@@ -37,9 +37,11 @@ if ~isfield(opts,'probe'), opts.probe = 'auto'; end   % 'auto' | 'A' | 'B'
 if ~isfield(opts,'segments'),      opts.segments      = {}; end      % optional: basenames of ephys subfolders, in concatenation order
 if ~isfield(opts,'require_manifest'), opts.require_manifest = false; end % if true, error when RAExp manifest is missing
 if ~isfield(opts,'align_to_master'), opts.align_to_master = true; end   % linear NP->master time warp per segment
-if ~isfield(opts,'sync_method'),     opts.sync_method     = 'auto'; end  % 'auto' | 'ttl' | 'linear' | 'none'
+if ~isfield(opts,'sync_method'),     opts.sync_method     = 'auto'; end  % 'auto'(=affine, fallback linear) | 'affine' | 'linear' | 'none'
 if ~isfield(opts,'master_stream'),   opts.master_stream   = 'Acquisition_Board'; end
-if ~isfield(opts,'sync_ttl_line'),   opts.sync_ttl_line   = []; end      % [] = any rising edge
+if ~isfield(opts,'sync_ttl_line'),   opts.sync_ttl_line   = []; end      % (unused; kept for back-compat)
+if ~isfield(opts,'master_ttl_chan'), opts.master_ttl_chan = []; end      % LFP chan of master sync pulse ([]=cfg.OneBox)
+if ~isfield(opts,'onebox_adc_idx'),  opts.onebox_adc_idx  = 3; end       % 1-based OneBox-ADC channel ("ADC2")
 
 TsRate = 1e4;
 
@@ -115,14 +117,20 @@ for s = 1:numel(sessions)
             end
             
             [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
-            if ~isfinite(Fs),  Fs  = 2500; end
-            if ~isfinite(nCh), nCh = 384;  end
-            
+            if ~isfinite(Fs) || ~isfinite(nCh)
+                error(['oe_read_stream_info failed to read Fs/nCh for %s. ' ...
+                    'Check structure.oebin in the recording folder. ' ...
+                    'Refusing to use a hardcoded fallback (would corrupt durations).'], ...
+                    streamRoot);
+            end
+            [~, streamName] = fileparts(streamRoot);
+            fprintf('  [%s] stream=%s  Fs=%g Hz  nCh=%d\n', segs(i).name, streamName, Fs, nCh);
+
             % drift sanity print
+            masterDur_s = (segs(i).t1_ts - segs(i).t0_ts) / TsRate;  % defined unconditionally (chBatch uses it)
             try
                 npSamples   = oe_nSamples_stream(streamRoot, nCh);
                 npDur_s     = double(npSamples) / double(Fs);
-                masterDur_s = (segs(i).t1_ts - segs(i).t0_ts) / TsRate;
                 drift_s     = npDur_s - masterDur_s;
                 syncBySeg(i) = drift_s;
                 if abs(drift_s) > 0.500
@@ -152,15 +160,20 @@ for s = 1:numel(sessions)
             segStart_ts = double(segs(i).t0_ts);
             segStop_ts  = double(segs(i).t1_ts);
             
-            % build warp once per segment
-            wopts = struct('use_ttl_sync', ~strcmp(opts.sync_method,'linear') ...
-                && ~strcmp(opts.sync_method,'none'), ...
-                'sync_ttl_line', opts.sync_ttl_line);
+            % build warp once per segment (analog OneBox<->master pulse fit)
+            wopts = struct();
+            wopts.sync_method     = opts.sync_method;          % 'auto'|'affine'|'linear'|'none'
+            wopts.segStart_ts     = segStart_ts;
+            wopts.segStop_ts      = segStop_ts;
+            if isfield(opts,'master_ttl_chan'), wopts.master_ttl_chan = opts.master_ttl_chan; end
+            if isfield(opts,'onebox_adc_idx'),  wopts.onebox_adc_idx  = opts.onebox_adc_idx;  end
+            if isfield(opts,'shift_search'),    wopts.shift_search    = opts.shift_search;    end
+            if isfield(opts,'minISI_s'),        wopts.minISI_s        = opts.minISI_s;        end
             [warpFn, warpInfo] = np_master_clock_warp( ...
                 segFolder, streamRoot, opts.master_stream, wopts);
             if strcmp(opts.sync_method,'none'), warpFn = @(t) t; warpInfo.method='identity'; end
             save_segment_sync(datapath, segs(i).name, warpFn, warpInfo);
-            
+
             % channel-batched decimate + warp + write
             chBatch = max(1, min(numel(chUse), ...
                 floor(opts.maxChunkMB * 1024^2 / (8 * (Fs * masterDur_s)))));
@@ -199,9 +212,15 @@ for s = 1:numel(sessions)
             end
             
             [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
-            if ~isfinite(Fs),  Fs  = 2500; end
-            if ~isfinite(nCh), nCh = 384;  end
-            
+            if ~isfinite(Fs) || ~isfinite(nCh)
+                error(['oe_read_stream_info failed to read Fs/nCh for %s. ' ...
+                    'Check structure.oebin in the recording folder. ' ...
+                    'Refusing to use a hardcoded fallback (would corrupt durations).'], ...
+                    streamRoot);
+            end
+            [~, streamName] = fileparts(streamRoot);
+            fprintf('  [%s] stream=%s  Fs=%g Hz  nCh=%d\n', segs(i).name, streamName, Fs, nCh);
+
             % ---- sync metric (NP stream vs master segment length) ----
             try
                 npSamples   = oe_nSamples_stream(streamRoot, nCh);
@@ -258,15 +277,20 @@ for s = 1:numel(sessions)
                 Y_np = double(Xs.');
             end
             
-            % ---- master-clock warp (TTL -> linear -> identity) ----
-            wopts = struct('use_ttl_sync', ~strcmp(opts.sync_method,'linear') ...
-                && ~strcmp(opts.sync_method,'none'), ...
-                'sync_ttl_line', opts.sync_ttl_line);
+            % ---- master-clock warp (analog OneBox<->master pulse -> linear -> identity) ----
+            wopts = struct();
+            wopts.sync_method     = opts.sync_method;          % 'auto'|'affine'|'linear'|'none'
+            wopts.segStart_ts     = segStart_ts;
+            wopts.segStop_ts      = segStop_ts;
+            if isfield(opts,'master_ttl_chan'), wopts.master_ttl_chan = opts.master_ttl_chan; end
+            if isfield(opts,'onebox_adc_idx'),  wopts.onebox_adc_idx  = opts.onebox_adc_idx;  end
+            if isfield(opts,'shift_search'),    wopts.shift_search    = opts.shift_search;    end
+            if isfield(opts,'minISI_s'),        wopts.minISI_s        = opts.minISI_s;        end
             [warpFn, warpInfo] = np_master_clock_warp( ...
                 segFolder, streamRoot, opts.master_stream, wopts);
             if strcmp(opts.sync_method,'none'), warpFn = @(t) t; warpInfo.method='identity'; end
             save_segment_sync(datapath, segs(i).name, warpFn, warpInfo);
-            
+
             nMaster = floor((segStop_ts - segStart_ts) / dt_ts);
             t_np_s     = (0:size(Y_np,1)-1)' / Fs_ds;
             t_np_in_m  = warpFn(t_np_s);
@@ -355,9 +379,15 @@ for s = 1:numel(sessions)
     Info.probe_requested = opts.probe;
     Info.sync_drift_s_bySeg = syncBySeg;
     Info.align_to_master = opts.align_to_master;
-    Info.sync_method_bySeg = cellfun(@(c) safefield(c,'method','unknown'), syncInfoBySeg, 'UniformOutput', false);
-    Info.sync_corr_bySeg   = cellfun(@(c) safefield(c,'peak_corr',NaN), syncInfoBySeg);
-    Info.sync_n_evts_bySeg = cellfun(@(c) safefield(c,'n_events',0),    syncInfoBySeg);
+    Info.sync_method_bySeg   = cellfun(@(c) safefield(c,'method','unknown'), syncInfoBySeg, 'UniformOutput', false);
+    Info.sync_corr_bySeg     = cellfun(@(c) safefield(c,'peak_corr',NaN), syncInfoBySeg);
+    Info.sync_n_evts_bySeg   = cellfun(@(c) safefield(c,'n_events',0),    syncInfoBySeg);
+    Info.sync_rmse_ms_bySeg  = cellfun(@(c) safefield(c,'rmse_ms',NaN),   syncInfoBySeg);
+    Info.sync_drift_ppm_bySeg= cellfun(@(c) safefield(c,'drift_ppm',NaN), syncInfoBySeg);
+    Info.sync_nUsed_bySeg    = cellfun(@(c) safefield(c,'n_used',0),      syncInfoBySeg);
+    % for piecewise: single-line residual = the nonlinear drift the warp removes
+    Info.sync_affine_rmse_ms_bySeg   = cellfun(@(c) safefield(c,'affine_rmse_ms',NaN),   syncInfoBySeg);
+    Info.sync_affine_maxabs_ms_bySeg = cellfun(@(c) safefield(c,'affine_maxabs_ms',NaN), syncInfoBySeg);
     
     save(fullfile(outDir,'InfoLFP_NP.mat'), 'Info');
     
@@ -458,14 +488,105 @@ end
 end
 
 function [Fs, nCh] = oe_read_stream_info(streamRoot, FsFallback, nChFallback)
-% Robust to stream folders containing dots: "OneBox-102.Probe*-LFP"
-Fs = FsFallback;
+% Read sample_rate and num_channels for a specific stream from structure.oebin.
+%
+% Uses jsondecode (R2016b+) and exact folder_name matching, which is robust to
+% the ordering of fields inside each stream object. Falls back to the legacy
+% regex+position heuristic only if jsondecode fails (e.g. malformed JSON), and
+% additionally cross-checks the result against the size of continuous.dat to
+% catch metadata mismatches.
+
+Fs  = FsFallback;
 nCh = nChFallback;
 
-recDir = fileparts(fileparts(streamRoot)); % .../recordingX
-oebin = fullfile(recDir,'structure.oebin');
-if exist(oebin,'file') ~= 2, return; end
+recDir = fileparts(fileparts(streamRoot));        % .../recordingX
+oebin  = fullfile(recDir, 'structure.oebin');
+if exist(oebin, 'file') ~= 2, return; end
 
+streamFolder = regexp(streamRoot, '[^\\/]+$', 'match', 'once');
+if isempty(streamFolder), return; end
+streamFolderSlash = [streamFolder '/'];           % OE writes folder_name with trailing slash
+
+% ---------- Primary path: jsondecode ----------
+try
+    J = jsondecode(fileread(oebin));
+catch
+    % JSON unreadable for some reason -> fall back to the legacy regex parser
+    [Fs, nCh] = oe_read_stream_info_legacy(streamRoot, FsFallback, nChFallback);
+    return
+end
+
+if ~isfield(J, 'continuous'), return; end
+C = J.continuous;
+
+% jsondecode returns a struct array if all elements share the same fields,
+% a cell array otherwise. Handle both.
+matched = false;
+if isstruct(C)
+    for k = 1:numel(C)
+        fn = '';
+        if isfield(C(k),'folder_name'), fn = C(k).folder_name; end
+        if strcmp(fn, streamFolderSlash) || strcmp(fn, streamFolder)
+            if isfield(C(k),'sample_rate'),  Fs  = double(C(k).sample_rate);  end
+            if isfield(C(k),'num_channels'), nCh = double(C(k).num_channels); end
+            matched = true; break
+        end
+    end
+elseif iscell(C)
+    for k = 1:numel(C)
+        ck = C{k};
+        fn = '';
+        if isfield(ck,'folder_name'), fn = ck.folder_name; end
+        if strcmp(fn, streamFolderSlash) || strcmp(fn, streamFolder)
+            if isfield(ck,'sample_rate'),  Fs  = double(ck.sample_rate);  end
+            if isfield(ck,'num_channels'), nCh = double(ck.num_channels); end
+            matched = true; break
+        end
+    end
+end
+
+if ~matched
+    % Did not find this stream in the JSON -> last-resort regex fallback
+    [Fs, nCh] = oe_read_stream_info_legacy(streamRoot, FsFallback, nChFallback);
+    return
+end
+
+% ---------- Sanity cross-check against continuous.dat size ----------
+% If timestamps.npy and continuous.dat disagree about how many samples
+% should exist given (Fs, nCh), warn loudly. This catches future cases
+% where the JSON itself is wrong.
+try
+    datFile = fullfile(streamRoot,'continuous.dat');
+    info    = dir(datFile);
+    if ~isempty(info) && isfinite(Fs) && isfinite(nCh) && nCh > 0
+        nSampDat = floor(double(info.bytes) / (2*double(nCh)));
+        tsPath = fullfile(streamRoot,'timestamps.npy');
+        if exist(tsPath,'file') == 2
+            nSampTs = npy_numel(tsPath);
+            if nSampTs > 0 && abs(nSampDat - nSampTs) / max(nSampTs,1) > 0.001
+                warning(['oe_read_stream_info: continuous.dat (%d samples) and ' ...
+                    'timestamps.npy (%d samples) disagree for %s. Check Fs/nCh in structure.oebin.'], ...
+                    nSampDat, nSampTs, streamFolder);
+            end
+        end
+    end
+catch
+end
+end
+
+
+function [Fs, nCh] = oe_read_stream_info_legacy(streamRoot, FsFallback, nChFallback)
+% Original regex+position heuristic, kept only as a fallback. WARNING: this
+% relies on the order of fields inside each stream object in structure.oebin
+% and is known to mis-attribute sample_rate when probe streams sit next to
+% the AcqBoard stream. Prefer the jsondecode path above.
+
+Fs  = FsFallback;
+nCh = nChFallback;
+
+recDir = fileparts(fileparts(streamRoot));
+oebin  = fullfile(recDir,'structure.oebin');
+if exist(oebin,'file') ~= 2, return; end
 try
     txt = fileread(oebin);
 catch
@@ -482,7 +603,6 @@ else
     streamShort = streamFolder;
 end
 
-% Anchor by folder_name first (always present), then fall back to stream_name.
 key1 = ['"folder_name": "' streamFolder '/"'];
 key2 = ['"folder_name": "' streamFolder '"'];
 key3 = ['"folder_name":"' streamFolder '/"'];
@@ -493,7 +613,6 @@ for cand = {key1,key2,key3,key4}
     if ~isempty(ix), break; end
 end
 if isempty(ix)
-    % legacy fallback: try several stream_name variants
     variants = {streamShort, ...
         strrep(streamShort,'_',' '), ...
         strrep(streamShort,'-',' '), ...
@@ -720,18 +839,28 @@ end
 
 function dur_s = oe_segment_acq_duration(segPath)
 % Prefer Acquisition Board duration (so timeline matches OB .lfp concatenation),
-% then fall back to probe streams if AcqBoard is missing.
+% then fall back to probe streams if AcqBoard is missing. Both Fs and nCh come
+% strictly from structure.oebin via oe_read_stream_info; no hardcoded defaults.
+% The resolved (stream, Fs, nCh, duration) tuple is printed so the caller can
+% sanity-check before the long preprocessing step.
 keys = {'Acquisition_Board','Rhythm_FPGA','ProbeA-LFP','ProbeB-LFP'};
 dur_s = NaN;
 for k = 1:numel(keys)
     streamRoot = oe_find_stream(segPath, keys{k});
     if isempty(streamRoot), continue; end
     [Fs, nCh] = oe_read_stream_info(streamRoot, NaN, NaN);
-    if ~isfinite(Fs), continue; end
-    if ~isfinite(nCh), nCh = 80; end
+    if ~isfinite(Fs) || ~isfinite(nCh)
+        warning(['oe_segment_acq_duration: could not resolve Fs/nCh for %s ' ...
+            'from structure.oebin; skipping this stream.'], streamRoot);
+        continue
+    end
     nSamp = oe_nSamples_stream(streamRoot, nCh);
     if isfinite(nSamp) && nSamp > 0
         dur_s = double(nSamp) / double(Fs);
+        [~, streamName] = fileparts(streamRoot);
+        fprintf(['  [oe_segment_acq_duration] stream=%s  Fs=%g Hz  nCh=%d  ' ...
+                 'nSamp=%d  dur=%.2f s  (%.3f h)\n'], ...
+                streamName, Fs, nCh, nSamp, dur_s, dur_s/3600);
         return
     end
 end
@@ -1026,6 +1155,26 @@ S = struct();
 S.method = method;
 S.created = datestr(now);
 switch method
+    case 'piecewise-onebox'
+        % warp = interp1(np_anchor_s, master_anchor_s, t) through matched pulse pairs
+        S.np_anchor_s     = warpInfo.np_anchor_s(:);
+        S.master_anchor_s = warpInfo.master_anchor_s(:);
+        S.a_s = warpInfo.a_s;          % affine summary (reference only)
+        S.b   = warpInfo.b;
+        if isfield(warpInfo,'drift_ppm'),       S.drift_ppm        = warpInfo.drift_ppm;       end
+        if isfield(warpInfo,'affine_rmse_ms'),  S.affine_rmse_ms   = warpInfo.affine_rmse_ms;  end
+        if isfield(warpInfo,'affine_maxabs_ms'),S.affine_maxabs_ms = warpInfo.affine_maxabs_ms;end
+        if isfield(warpInfo,'n_used'),          S.n_used           = warpInfo.n_used;          end
+    case 'affine-onebox'
+        % t_master = a_s + b * t_np  (seconds, relative to segment start)
+        S.a_s = warpInfo.a_s;
+        S.b   = warpInfo.b;
+        if isfield(warpInfo,'np_anchor_s'),     S.np_anchor_s     = warpInfo.np_anchor_s(:);     end
+        if isfield(warpInfo,'master_anchor_s'), S.master_anchor_s = warpInfo.master_anchor_s(:); end
+        if isfield(warpInfo,'rmse_ms'),   S.rmse_ms   = warpInfo.rmse_ms;   end
+        if isfield(warpInfo,'maxabs_ms'), S.maxabs_ms = warpInfo.maxabs_ms; end
+        if isfield(warpInfo,'drift_ppm'), S.drift_ppm = warpInfo.drift_ppm; end
+        if isfield(warpInfo,'n_used'),    S.n_used    = warpInfo.n_used;    end
     case {'ttl','oe-synchronizer'}
         S.np_anchor_s     = warpInfo.np_event_times_s(:);
         if isfield(warpInfo,'master_event_times_s')
@@ -1039,7 +1188,11 @@ switch method
         S.peak_corr = warpInfo.peak_corr;
         S.n_events  = warpInfo.n_events;
     case 'linear-ratio'
-        S.warp_ratio  = warpInfo.masterDur_s / max(warpInfo.npDur_s, eps);
+        if isfield(warpInfo,'b') && ~isempty(warpInfo.b)
+            S.warp_ratio = warpInfo.b;
+        else
+            S.warp_ratio = warpInfo.masterDur_s / max(warpInfo.npDur_s, eps);
+        end
         S.npDur_s     = warpInfo.npDur_s;
         S.masterDur_s = warpInfo.masterDur_s;
     case {'identity-no-master','identity'}

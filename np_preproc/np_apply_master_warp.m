@@ -19,6 +19,12 @@ end
 S = load(mf);
 
 switch S.method
+    case 'piecewise-onebox'
+        % piecewise-linear interp through matched pulse pairs (same map as NP LFP)
+        t_master_s = interp1(S.np_anchor_s, S.master_anchor_s, t_np_s, 'linear', 'extrap');
+    case 'affine-onebox'
+        % t_master = a_s + b * t_np   (same affine map used for NP LFP)
+        t_master_s = S.a_s + S.b * t_np_s;
     case {'ttl','oe-synchronizer'}
         t_master_s = interp1(S.np_anchor_s, S.master_anchor_s, t_np_s, 'linear', 'extrap');
     case 'linear-ratio'

@@ -74,7 +74,7 @@ switch animal_name
             cfg.face_ch  = 23;
             cfg.eye_ch   = 24;
             cfg.baphy_train_gap_s = 0.10;
-        elseif contains(datapath, 'experiment')
+        elseif contains(datapath, 'experiment') || contains(datapath, 'OBG') || contains(datapath, 'OBG_project') 
             cfg.fus_ch   = [];
             cfg.emg      = 65;
             cfg.ob       = 76;
@@ -107,7 +107,7 @@ switch animal_name
             cfg.face_ch  = 23;
             cfg.eye_ch   = 24;
             cfg.baphy_train_gap_s = 0.10;
-        elseif contains(datapath, 'experiment')
+        elseif contains(datapath, 'experiment') || contains(datapath, 'OBG') || contains(datapath, 'OBG_project') 
             cfg.fus_ch   = [];
             cfg.emg      = 34;
             cfg.ob       = 46;
